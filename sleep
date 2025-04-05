@@ -15,7 +15,7 @@ hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5
 
 cap = cv2.VideoCapture(0)
 
-# 졸음 판단 변수
+
 eye_close_start_time = None
 hand_static_start_time = None
 drowsy = False
@@ -90,7 +90,7 @@ def detect_loop():
             elif time.time() - hand_static_start_time >= 5 and eye_closure_detected:
                 if not drowsy:
                     drowsy = True
-                    print("⚠️ 졸음이 감지되었습니다!")
+                    print("Drowsiness detected!")
         else:
             hand_static_start_time = None
             drowsy = False
