@@ -1,0 +1,25 @@
+import cv2
+
+def test_camera():
+    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)  # 라즈베리파이용 카메라 열기
+
+    if not cap.isOpened():
+        print("Camera failed to open!")
+        return
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to read frame")
+            break
+
+        cv2.imshow('Camera Test', frame)
+
+        # 키보드에서 'q' 키 누르면 종료
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+test_camera()
