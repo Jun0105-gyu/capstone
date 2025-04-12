@@ -1,25 +1,31 @@
 import cv2
 
-def test_camera():
-    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)  # 라즈베리파이용 카메라 열기
+# Open the camera (0 usually means the default camera)
+cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
-    if not cap.isOpened():
-        print("Camera failed to open!")
-        return
+# Check if the camera opened successfully
+if not cap.isOpened():
+    print("Failed to open the camera.")
+    exit()
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Failed to read frame")
-            break
+while True:
+    # Read a frame from the camera
+    ret, frame = cap.read()
 
-        cv2.imshow('Camera Test', frame)
+    # If the frame was not read correctly, skip
+    if not ret:
+        print("Failed to grab frame.")
+        continue
 
-        # 키보드에서 'q' 키 누르면 종료
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+    # Display the frame on the screen
+    cv2.imshow("Camera Preview", frame)
 
-    cap.release()
-    cv2.destroyAllWindows()
+    # Press 'q' to exit the loop
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-test_camera()
+# Release the camera resource
+cap.release()
+
+# Close all OpenCV windows
+cv2.destroyAllWindows()
