@@ -6,10 +6,12 @@ import numpy as np
 app = Flask(__name__)
 drowsy = False
 
+# Initialize MediaPipe Face Mesh
 mp_face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
+# Function to calculate Eye Aspect Ratio (EAR)
 def eye_aspect_ratio(landmarks, eye_indices):
     points = np.array([landmarks[i] for i in eye_indices])
     vertical1 = np.linalg.norm(points[1] - points[5])
@@ -18,15 +20,17 @@ def eye_aspect_ratio(landmarks, eye_indices):
     ear = (vertical1 + vertical2) / (2.0 * horizontal)
     return ear
 
+# API Endpoint for detecting drowsiness
 @app.route("/detect_drowsiness", methods=["GET"])
 def detect_drowsiness():
     global drowsy
     detect_drowsiness_loop()
     return jsonify({"drowsy": drowsy})
 
+# Main loop for detecting drowsiness using camera
 def detect_drowsiness_loop():
     global drowsy
-    cap = cv2.VideoCapture("/dev/video0", cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)  # Use USB webcam or Pi Camera
 
     if not cap.isOpened():
         print("Camera failed to open!")
@@ -37,7 +41,7 @@ def detect_drowsiness_loop():
     EYE_AR_CONSEC_FRAMES = 30
     counter = 0
 
-    for _ in range(100):  # 100프레임 = 약 3초
+    for _ in range(100):
         ret, frame = cap.read()
         if not ret:
             print("Failed to grab frame.")
@@ -45,6 +49,11 @@ def detect_drowsiness_loop():
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = mp_face_mesh.process(rgb)
+
+        # Display the camera feed
+        cv2.imshow("Camera View", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
         if results.multi_face_landmarks:
             for face_landmarks in results.multi_face_landmarks:
@@ -66,11 +75,15 @@ def detect_drowsiness_loop():
                 if counter >= EYE_AR_CONSEC_FRAMES:
                     drowsy = True
                     cap.release()
+                    cv2.destroyAllWindows()
                     return
         else:
             print("No face detected.")
 
     drowsy = False
     cap.release()
+    cv2.destroyAllWindows()
+
+# Run Flask server
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
