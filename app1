@@ -1,0 +1,89 @@
+from flask import Flask, jsonify
+import cv2
+import mediapipe as mp
+import numpy as np
+
+app = Flask(__name__)
+drowsy = False
+
+mp_face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
+LEFT_EYE = [33, 160, 158, 133, 153, 144]
+RIGHT_EYE = [362, 385, 387, 263, 373, 380]
+
+def eye_aspect_ratio(landmarks, eye_indices):
+    points = np.array([landmarks[i] for i in eye_indices])
+    vertical1 = np.linalg.norm(points[1] - points[5])
+    vertical2 = np.linalg.norm(points[2] - points[4])
+    horizontal = np.linalg.norm(points[0] - points[3])
+    ear = (vertical1 + vertical2) / (2.0 * horizontal)
+    return ear
+
+@app.route("/detect_drowsiness", methods=["GET"])
+def detect_drowsiness():
+    global drowsy
+    drowsy = False
+    detect_drowsiness_loop()
+    return jsonify({"drowsy": drowsy})
+
+def detect_drowsiness_loop():
+    global drowsy
+    cap = cv2.VideoCapture("/dev/video0", cv2.CAP_ANY)
+
+    if not cap.isOpened():
+        print("Camera failed to open!")
+        return
+
+    EYE_AR_THRESH = 0.23
+    EYE_AR_CONSEC_FRAMES = 30
+    counter = 0
+
+    for _ in range(100):  # 약 3초 분량
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame.")
+            continue
+
+        # 얼굴 영역 인식
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = mp_face_mesh.process(rgb)
+
+        if results.multi_face_landmarks:
+            for face_landmarks in results.multi_face_landmarks:
+                landmarks = [(lm.x, lm.y) for lm in face_landmarks.landmark]
+                h, w = frame.shape[:2]
+                landmarks = np.array([(int(x * w), int(y * h)) for x, y in landmarks])
+
+                left_ear = eye_aspect_ratio(landmarks, LEFT_EYE)
+                right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE)
+                ear = (left_ear + right_ear) / 2.0
+
+                print(f"EAR: {ear:.3f}")
+
+                # EAR 값 시각화
+                cv2.putText(frame, f"EAR: {ear:.3f}", (10, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+                if ear < EYE_AR_THRESH:
+                    counter += 1
+                else:
+                    counter = 0
+
+                if counter >= EYE_AR_CONSEC_FRAMES:
+                    drowsy = True
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    return
+        else:
+            print("No face detected.")
+
+        # 미리보기 창 출력
+        cv2.imshow("Preview", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    drowsy = False
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
