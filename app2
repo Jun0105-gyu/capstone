@@ -20,7 +20,7 @@ eye_start_time = None
 head_start_time = None
 hand_start_time = None
 nose_y_history = []
-hand_movement_history = []
+hand_10_history = []
 
 def eye_aspect_ratio(landmarks, eye_indices):
     points = np.array([landmarks[i] for i in eye_indices])
@@ -57,17 +57,16 @@ def drowsiness_detection_loop():
         h, w = frame.shape[:2]
         current_time = time.time()
 
-        # Eye logic
         eye_drowsy = False
         head_drowsy = False
         hand_drowsy = False
 
+        # Eye & Head logic
         if face_results.multi_face_landmarks:
             for face_landmarks in face_results.multi_face_landmarks:
                 landmarks = [(lm.x, lm.y) for lm in face_landmarks.landmark]
                 landmarks = np.array([(int(x * w), int(y * h)) for x, y in landmarks])
 
-                # EAR Calculation
                 left_ear = eye_aspect_ratio(landmarks, LEFT_EYE)
                 right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE)
                 ear = (left_ear + right_ear) / 2.0
@@ -81,7 +80,6 @@ def drowsiness_detection_loop():
                 else:
                     eye_start_time = None
 
-                # Head tilt logic using nose movement
                 nose_y = int(face_landmarks.landmark[1].y * h)
                 nose_y_history.append(nose_y)
                 if len(nose_y_history) > 150:
@@ -102,16 +100,18 @@ def drowsiness_detection_loop():
             head_start_time = None
             nose_y_history.clear()
 
-        # Hand movement logic
+        # Hand logic (based on landmark #10)
         if hand_results.multi_hand_landmarks:
             for hand_landmarks in hand_results.multi_hand_landmarks:
-                wrist = hand_landmarks.landmark[0]
-                wrist_pos = (int(wrist.x * w), int(wrist.y * h))
-                hand_movement_history.append(wrist_pos)
-                if len(hand_movement_history) > 150:
-                    hand_movement_history.pop(0)
+                landmark_10 = hand_landmarks.landmark[10]
+                hand_10_pos = (int(landmark_10.x * w), int(landmark_10.y * h))
+                hand_10_history.append(hand_10_pos)
+                if len(hand_10_history) > 150:
+                    hand_10_history.pop(0)
 
-                movement = calculate_hand_movement(hand_movement_history)
+                movement = calculate_hand_movement(hand_10_history)
+                print(f"Hand #10 movement: {movement:.2f} pixels")
+
                 if movement < 1.5:
                     if hand_start_time is None:
                         hand_start_time = current_time
@@ -122,16 +122,15 @@ def drowsiness_detection_loop():
                     hand_start_time = None
         else:
             hand_start_time = None
-            hand_movement_history.clear()
+            hand_10_history.clear()
 
-        # Final logic: (hand and head) OR (hand and eyes)
+        # Final drowsiness logic
         if (hand_drowsy and head_drowsy) or (hand_drowsy and eye_drowsy):
             drowsy = True
             print("Drowsiness Detected!")
         else:
             drowsy = False
 
-        # Show preview
         cv2.imshow("Camera Preview", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
