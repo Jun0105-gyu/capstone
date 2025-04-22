@@ -1,10 +1,13 @@
+from flask import Flask, jsonify
 import cv2
 import mediapipe as mp
 import numpy as np
-from flask import Flask, jsonify
+import threading
 
 app = Flask(__name__)
 drowsy = False
+cap = None
+thread_started = False
 
 mp_face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
@@ -18,26 +21,21 @@ def eye_aspect_ratio(landmarks, eye_indices):
     ear = (vertical1 + vertical2) / (2.0 * horizontal)
     return ear
 
-@app.route("/detect_drowsiness", methods=["GET"])
-def detect_drowsiness():
-    global drowsy
-    drowsy = False
-    detect_drowsiness_loop()
-    return jsonify({"drowsy": drowsy})
-
-def detect_drowsiness_loop():
-    global drowsy
-    cap = cv2.VideoCapture("/dev/video0", cv2.CAP_V4L2)
-
-    if not cap.isOpened():
-        print("Camera failed to open!")
-        return
-
+def drowsiness_detection_loop():
+    global drowsy, cap
     EYE_AR_THRESH = 0.23
     EYE_AR_CONSEC_FRAMES = 30
     counter = 0
 
-    for _ in range(100):  # 약 3초간 감지
+    cap = cv2.VideoCapture("/dev/video0", cv2.CAP_V4L2)
+
+    if not cap.isOpened():
+        print("Camera failed to open.")
+        return
+
+    print("Camera opened.")
+
+    while True:
         ret, frame = cap.read()
         if not ret:
             print("Failed to grab frame.")
@@ -65,21 +63,30 @@ def detect_drowsiness_loop():
 
                 if counter >= EYE_AR_CONSEC_FRAMES:
                     drowsy = True
-                    cap.release()
-                    cv2.destroyAllWindows()
-                    return
-
+                else:
+                    drowsy = False
         else:
             print("No face detected.")
+            drowsy = False
 
-        # 여기가 미리보기 부분
-        cv2.imshow("Camera Preview", frame)
+        # 카메라 미리보기 띄우기
+        cv2.imshow("Camera", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    drowsy = False
     cap.release()
     cv2.destroyAllWindows()
+
+@app.route("/detect_drowsiness", methods=["GET"])
+def detect_drowsiness():
+    global drowsy, thread_started
+
+    # 백그라운드 스레드로 한 번만 실행
+    if not thread_started:
+        threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
+        thread_started = True
+
+    return jsonify({"drowsy": drowsy})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
