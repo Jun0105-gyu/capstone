@@ -1,7 +1,7 @@
-from flask import Flask, jsonify
 import cv2
 import mediapipe as mp
 import numpy as np
+from flask import Flask, jsonify
 
 app = Flask(__name__)
 drowsy = False
@@ -27,7 +27,7 @@ def detect_drowsiness():
 
 def detect_drowsiness_loop():
     global drowsy
-    cap = cv2.VideoCapture("/dev/video0", cv2.CAP_ANY)
+    cap = cv2.VideoCapture("/dev/video0", cv2.CAP_V4L2)
 
     if not cap.isOpened():
         print("Camera failed to open!")
@@ -37,13 +37,12 @@ def detect_drowsiness_loop():
     EYE_AR_CONSEC_FRAMES = 30
     counter = 0
 
-    for _ in range(100):  # 약 3초 분량
+    for _ in range(100):  # 약 3초간 감지
         ret, frame = cap.read()
         if not ret:
             print("Failed to grab frame.")
             continue
 
-        # 얼굴 영역 인식
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = mp_face_mesh.process(rgb)
 
@@ -59,10 +58,6 @@ def detect_drowsiness_loop():
 
                 print(f"EAR: {ear:.3f}")
 
-                # EAR 값 시각화
-                cv2.putText(frame, f"EAR: {ear:.3f}", (10, 30), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
                 if ear < EYE_AR_THRESH:
                     counter += 1
                 else:
@@ -73,11 +68,12 @@ def detect_drowsiness_loop():
                     cap.release()
                     cv2.destroyAllWindows()
                     return
+
         else:
             print("No face detected.")
 
-        # 미리보기 창 출력
-        cv2.imshow("Preview", frame)
+        # 여기가 미리보기 부분
+        cv2.imshow("Camera Preview", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
