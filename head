@@ -1,95 +1,97 @@
 from flask import Flask, jsonify
 import cv2
 import mediapipe as mp
-import numpy as np
 import time
+import numpy as np
+import threading
 
 app = Flask(__name__)
 drowsy = False
 
+# MediaPipe 초기화
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
-hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+hands = mp_hands.Hands()
 
-LEFT_EYE = [33, 160, 158, 133, 153, 144]
-RIGHT_EYE = [362, 385, 387, 263, 373, 380]
+# 졸음 감지 기준
+EYE_THRESHOLD = 0.23
+EYE_DURATION = 5
+HAND_DURATION = 5
+DROP_THRESHOLD = 30  # px
+DROP_DURATION = 5
+FPS = 30
 
-def eye_aspect_ratio(landmarks, eye_indices):
-    points = np.array([landmarks[i] for i in eye_indices])
-    vertical1 = np.linalg.norm(points[1] - points[5])
-    vertical2 = np.linalg.norm(points[2] - points[4])
-    horizontal = np.linalg.norm(points[0] - points[3])
+# 상태 변수
+eye_start_time = None
+hand_start_time = None
+head_start_time = None
+
+eye_condition = False
+hand_condition = False
+head_condition = False
+
+# 기록
+nose_y_history = []
+hand_10_history = []
+
+# 쓰레드 플래그
+stop_flag = False
+
+def calculate_ear(landmarks, eye_indices):
+    p = np.array([landmarks[i] for i in eye_indices])
+    vertical1 = np.linalg.norm(p[1] - p[5])
+    vertical2 = np.linalg.norm(p[2] - p[4])
+    horizontal = np.linalg.norm(p[0] - p[3])
     return (vertical1 + vertical2) / (2.0 * horizontal)
 
-@app.route("/detect_drowsiness", methods=["GET"])
-def detect_drowsiness():
-    global drowsy
-    drowsy = False
-    detect_drowsiness_loop()
-    return jsonify({"drowsy": drowsy})
+def calculate_hand_movement(history):
+    if len(history) < 2:
+        return 0
+    deltas = [np.linalg.norm(np.array(history[i]) - np.array(history[i - 1])) for i in range(1, len(history))]
+    return sum(deltas) / len(deltas)
 
-def detect_drowsiness_loop():
-    global drowsy
+def drowsiness_detection_loop():
+    global drowsy, eye_start_time, hand_start_time, head_start_time
+    global eye_condition, hand_condition, head_condition
+    global nose_y_history, hand_10_history, stop_flag
 
-    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-    if not cap.isOpened():
-        print("Failed to open camera.")
-        return
-
-    FPS = 30
-    EYE_AR_THRESH = 0.23
-    EYE_AR_CONSEC_FRAMES = 30
-    DROP_THRESHOLD = 40
-    DROP_DURATION = 5
-    HAND_MOVE_THRESHOLD = 40
-    HAND_HOLD_DURATION = 5
-
-    eye_counter = 0
-    nose_y_history = []
-    hand_10_history = []
-
-    head_start_time = None
-    hand_start_time = None
-
-    head_condition = False
-    hand_condition = False
-    eye_condition = False
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Failed to grab frame.")
+    cap = cv2.VideoCapture(0)
+    while not stop_flag:
+        success, frame = cap.read()
+        if not success:
+            print("Failed to read frame.")
             continue
 
         frame = cv2.flip(frame, 1)
-        h, w = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         face_results = face_mesh.process(rgb)
         hand_results = hands.process(rgb)
-
         current_time = time.time()
 
         if face_results.multi_face_landmarks:
             for face_landmarks in face_results.multi_face_landmarks:
-                landmarks = [(int(p.x * w), int(p.y * h)) for p in face_landmarks.landmark]
+                h, w, _ = frame.shape
+                landmarks = [(int(lm.x * w), int(lm.y * h)) for lm in face_landmarks.landmark]
 
-                # EAR
-                left_ear = eye_aspect_ratio(landmarks, LEFT_EYE)
-                right_ear = eye_aspect_ratio(landmarks, RIGHT_EYE)
+                # Eye
+                LEFT_EYE = [33, 160, 158, 133, 153, 144]
+                RIGHT_EYE = [362, 385, 387, 263, 373, 380]
+                left_ear = calculate_ear(landmarks, LEFT_EYE)
+                right_ear = calculate_ear(landmarks, RIGHT_EYE)
                 ear = (left_ear + right_ear) / 2.0
-                print(f"EAR: {ear:.3f}")
 
-                if ear < EYE_AR_THRESH:
-                    eye_counter += 1
+                if ear < EYE_THRESHOLD:
+                    if eye_start_time is None:
+                        eye_start_time = current_time
+                    elif current_time - eye_start_time >= EYE_DURATION:
+                        eye_condition = True
+                        print("[EYE] Drowsiness detected.")
                 else:
-                    eye_counter = 0
+                    eye_start_time = None
+                    eye_condition = False
 
-                if eye_counter >= EYE_AR_CONSEC_FRAMES:
-                    eye_condition = True
-                    print("Eyes closed for 5 seconds")
-
-                # Nose Y
+                # Head
                 nose_y = landmarks[1][1]
                 nose_y_history.append(nose_y)
                 if len(nose_y_history) > FPS * 10:
@@ -98,58 +100,59 @@ def detect_drowsiness_loop():
                 if len(nose_y_history) >= FPS * 6:
                     baseline_y = sum(nose_y_history[:FPS]) / FPS
                     dy = nose_y - baseline_y
-                    print(f"Head vertical shift: {dy:.2f} pixels")
+                    print(f"[HEAD] DY: {dy:.2f}")
 
                     if dy > DROP_THRESHOLD:
                         if head_start_time is None:
                             head_start_time = current_time
-                        else:
-                            held_time = current_time - head_start_time
-                            print(f"Head held down for: {held_time:.1f} seconds")
-                            if held_time >= DROP_DURATION:
-                                head_condition = True
+                        elif current_time - head_start_time >= DROP_DURATION:
+                            head_condition = True
+                            print("[HEAD] Drowsiness detected.")
                     else:
                         head_start_time = None
                         head_condition = False
 
-        # Hands
         if hand_results.multi_hand_landmarks:
             for hand_landmarks in hand_results.multi_hand_landmarks:
-                lm10 = hand_landmarks.landmark[10]
-                x10, y10 = int(lm10.x * w), int(lm10.y * h)
-                hand_10_history.append((x10, y10))
+                h, w, _ = frame.shape
+                x = int(hand_landmarks.landmark[10].x * w)
+                y = int(hand_landmarks.landmark[10].y * h)
+                hand_10_history.append((x, y))
                 if len(hand_10_history) > FPS * 5:
                     hand_10_history.pop(0)
 
-                if len(hand_10_history) >= 2:
-                    movements = [
-                        np.linalg.norm(np.array(hand_10_history[i]) - np.array(hand_10_history[i - 1]))
-                        for i in range(1, len(hand_10_history))
-                    ]
-                    avg_movement = sum(movements) / len(movements)
-                    print(f"Hand movement: {avg_movement:.2f}")
+            movement = calculate_hand_movement(hand_10_history)
+            print(f"[HAND] Movement: {movement:.2f}")
+            if movement < 40:
+                if hand_start_time is None:
+                    hand_start_time = current_time
+                elif current_time - hand_start_time >= HAND_DURATION:
+                    hand_condition = True
+                    print("[HAND] Drowsiness detected.")
+            else:
+                hand_start_time = None
+                hand_condition = False
 
-                    if avg_movement < HAND_MOVE_THRESHOLD:
-                        if hand_start_time is None:
-                            hand_start_time = current_time
-                        elif current_time - hand_start_time >= HAND_HOLD_DURATION:
-                            hand_condition = True
-                            print("Hand still for 5 seconds")
-                    else:
-                        hand_start_time = None
-                        hand_condition = False
-
-        if ((hand_condition and head_condition) or (hand_condition and eye_condition)):
+        # Final Logic
+        if (hand_condition and head_condition) or (hand_condition and eye_condition):
             drowsy = True
-            print("Drowsiness detected.")
-            break
+            print("=== DROWSINESS CONFIRMED ===")
+        else:
+            drowsy = False
 
+        # Show Camera
         cv2.imshow("Camera Preview", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
+            stop_flag = True
             break
 
     cap.release()
     cv2.destroyAllWindows()
 
+@app.route("/detect_drowsiness", methods=["GET"])
+def detect_drowsiness():
+    return jsonify({"drowsy": drowsy})
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    threading.Thread(target=drowsiness_detection_loop).start()
+    app.run(host="0.0.0.0", port=5000)
