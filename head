@@ -56,9 +56,7 @@ def detect_drowsiness_loop():
     hand_condition = False
     eye_condition = False
 
-    start_time = time.time()
-
-    while time.time() - start_time < 10:
+    while True:
         ret, frame = cap.read()
         if not ret:
             print("Failed to grab frame.")
