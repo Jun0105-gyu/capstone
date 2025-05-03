@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
+import 'package:intl/intl.dart';
+import 'package:drowsy_timer/stats/statistics_page.dart'; // 통계 페이지 import
+import 'package:drowsy_timer/stats/db_helper.dart';
 
 void main() {
   runApp(DrowsinessApp());
@@ -34,7 +37,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
       setState(() {}); // 화면 갱신
 
       try {
-        final response = await http.get(Uri.parse('http://192.168.137.82:5000/detect_drowsiness'));
+        final response = await http.get(Uri.parse('http://192.168.137.69:5000/detect_drowsiness'));
 
         if (response.statusCode == 200) {
           print("Response: ${response.body}");
@@ -64,10 +67,18 @@ class _StopwatchPageState extends State<StopwatchPage> {
     });
   }
 
-  void stopTimer() {
+  void stopTimer() async {
     stopwatch.stop();
     isRunning = false;
     _timer?.cancel();
+
+    final dbHelper = DatabaseHelper();
+    final now = DateTime.now();
+    final date = DateFormat('yyyy-MM-dd').format(now);
+    final seconds = stopwatch.elapsed.inSeconds;
+
+    await dbHelper.insertRecord({'date': date, 'seconds': seconds});
+
     setState(() {});
   }
 
@@ -99,6 +110,16 @@ class _StopwatchPageState extends State<StopwatchPage> {
             ElevatedButton(
               onPressed: isRunning ? stopTimer : startTimer,
               child: Text(isRunning ? 'Stop' : 'Start'),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => StatisticsPage()),
+                );
+              },
+              child: Text('View Statistics'),
             ),
           ],
         ),
