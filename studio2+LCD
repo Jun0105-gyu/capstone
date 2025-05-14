@@ -1,0 +1,111 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:async';
+import 'dart:convert';
+
+void main() {
+  runApp(MaterialApp(
+    title: 'Drowsiness Timer',
+    home: DrowsinessTimerPage(),
+  ));
+}
+
+class DrowsinessTimerPage extends StatefulWidget {
+  @override
+  _DrowsinessTimerPageState createState() => _DrowsinessTimerPageState();
+}
+
+class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
+  Stopwatch _stopwatch = Stopwatch();
+  Timer? _timer;
+  String _formattedTime = "00:00:00";
+  final String flaskURL = 'http://192.168.0.42:5000'; // Flask 주소로 수정
+
+  void _startTimer() {
+    if (!_stopwatch.isRunning) {
+      _stopwatch.start();
+      _timer = Timer.periodic(Duration(seconds: 1), (timer) async {
+        setState(() {
+          _formattedTime = _formatDuration(_stopwatch.elapsed);
+        });
+        await sendTimeToFlask(_formattedTime);
+        await checkDrowsiness();
+      });
+    }
+  }
+
+  void _stopTimer() {
+    _stopwatch.stop();
+    _timer?.cancel();
+    sendTimeToFlask(_formattedTime); // LCD도 멈춘 시각으로 고정
+  }
+
+  void _resetTimer() {
+    _stopwatch.reset();
+    setState(() {
+      _formattedTime = "00:00:00";
+    });
+    sendTimeToFlask(_formattedTime); // LCD 초기화
+    _stopwatch.stop();
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  Future<void> sendTimeToFlask(String time) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$flaskURL/update_time'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"time": time}),
+      );
+    } catch (e) {
+      print("Failed to send time: $e");
+    }
+  }
+
+  Future<void> checkDrowsiness() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/detect_drowsiness'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data["drowsy"] == true) {
+          print("졸음 감지됨 → 타이머 자동 정지");
+          _stopTimer();
+        }
+      }
+    } catch (e) {
+      print("Failed to check drowsiness: $e");
+    }
+  }
+
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, "0");
+    return "${two(d.inHours)}:${two(d.inMinutes % 60)}:${two(d.inSeconds % 60)}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Drowsiness Timer')),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_formattedTime, style: TextStyle(fontSize: 48)),
+            SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(onPressed: _startTimer, child: Text("Start")),
+                SizedBox(width: 10),
+                ElevatedButton(onPressed: _stopTimer, child: Text("Stop")),
+                SizedBox(width: 10),
+                ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
