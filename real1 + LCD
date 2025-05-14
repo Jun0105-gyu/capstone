@@ -198,6 +198,28 @@ def drowsiness_detection_loop():
     cap.release()
     cv2.destroyAllWindows()
 
+# === API ===
+
+@app.route("/get_time", methods=["GET"])
+def get_time():
+    return jsonify({"time": current_time_str})
+
+@app.route("/start", methods=["GET"])
+def start_timer():
+    global timer_running, stopwatch_start_time
+    timer_running = True
+    if stopwatch_start_time is None:
+        stopwatch_start_time = time.time()
+    print("[API] Timer started")
+    return jsonify({"status": "started"})
+
+@app.route("/stop", methods=["GET"])
+def stop_timer():
+    global timer_running
+    timer_running = False
+    print("[API] Timer stopped")
+    return jsonify({"status": "stopped"})
+
 @app.route("/update_time", methods=["POST"])
 def update_time():
     data = request.json
@@ -232,13 +254,13 @@ def reset_status():
     head_condition = False
     nose_y_history.clear()
     hand_10_history.clear()
-
     timer_running = False
     stopwatch_start_time = None
     update_lcd_time("00:00:00")
     print("[RESET] System reset")
     return jsonify({"status": "reset"})
 
+# === 실행 ===
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
     threading.Thread(target=monitor_buttons, daemon=True).start()
