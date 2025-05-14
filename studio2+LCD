@@ -19,12 +19,14 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
   Stopwatch _stopwatch = Stopwatch();
   Timer? _timer;
   String _formattedTime = "00:00:00";
-  final String flaskURL = 'http://192.168.137.69:5000'; // ← 여기에 라즈베리파이 IP 넣기
+  final String flaskURL = 'http://192.168.137.69:5000'; // ← 너의 Raspberry Pi IP 주소
 
   void _startTimer() {
     if (!_stopwatch.isRunning) {
+      print(">>> 타이머 시작됨");
       _stopwatch.start();
       _timer = Timer.periodic(Duration(seconds: 1), (timer) async {
+        print(">>> 1초마다 실행 중");
         setState(() {
           _formattedTime = _formatDuration(_stopwatch.elapsed);
         });
@@ -78,12 +80,25 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
           print("졸음 감지됨 → 타이머 자동 정지");
           _stopTimer();
 
-          // 상태 초기화 요청 (Flask 상태 초기화)
+          showDialog(
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                title: Text("졸음 감지"),
+                content: Text("졸음이 감지되어 타이머가 정지되었습니다."),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text("확인"),
+                  ),
+                ],
+              );
+            },
+          );
+
           await http.get(Uri.parse('$flaskURL/reset'));
           print("Flask 상태 초기화됨");
         }
-      } else {
-        print("Failed to get drowsiness data: ${res.statusCode}");
       }
     } catch (e) {
       print("Error checking drowsiness: $e");
