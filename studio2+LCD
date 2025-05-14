@@ -16,57 +16,42 @@ class DrowsinessTimerPage extends StatefulWidget {
 }
 
 class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
-  Stopwatch _stopwatch = Stopwatch();
-  Timer? _timer;
+  Timer? _pollingTimer;
   String _formattedTime = "00:00:00";
-  final String flaskURL = 'http://192.168.137.69:5000'; // ← 너의 Raspberry Pi IP 주소
+  final String flaskURL = 'http://192.168.137.69:5000'; // ← 너의 Flask 주소
 
-  void _startTimer() {
-    if (!_stopwatch.isRunning) {
-      print(">>> 타이머 시작됨");
-      _stopwatch.start();
-      _timer = Timer.periodic(Duration(seconds: 1), (timer) async {
-        print(">>> 1초마다 실행 중");
-        setState(() {
-          _formattedTime = _formatDuration(_stopwatch.elapsed);
-        });
-        await sendTimeToFlask(_formattedTime);
-        await checkDrowsiness();
-      });
-    }
+  @override
+  void initState() {
+    super.initState();
+    _startPollingFlaskTime();
   }
 
-  void _stopTimer() {
-    _stopwatch.stop();
-    _timer?.cancel();
-    sendTimeToFlask(_formattedTime);
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
   }
 
-  void _resetTimer() {
-    _stopwatch.reset();
-    setState(() {
-      _formattedTime = "00:00:00";
+  void _startPollingFlaskTime() {
+    _pollingTimer = Timer.periodic(Duration(seconds: 1), (timer) async {
+      await fetchTimeFromFlask();
+      await checkDrowsiness();
     });
-    sendTimeToFlask(_formattedTime);
-    _stopwatch.stop();
-    _timer?.cancel();
-    _timer = null;
   }
 
-  Future<void> sendTimeToFlask(String time) async {
+  Future<void> fetchTimeFromFlask() async {
     try {
-      final res = await http.post(
-        Uri.parse('$flaskURL/update_time'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"time": time}),
-      );
+      final res = await http.get(Uri.parse('$flaskURL/get_time'));
       if (res.statusCode == 200) {
-        print("Time sent to Flask: $time");
+        final data = jsonDecode(res.body);
+        setState(() {
+          _formattedTime = data["time"];
+        });
       } else {
-        print("Failed to send time: ${res.statusCode}");
+        print("Failed to get time: ${res.statusCode}");
       }
     } catch (e) {
-      print("Failed to send time: $e");
+      print("Error fetching time: $e");
     }
   }
 
@@ -75,17 +60,15 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
       final res = await http.get(Uri.parse('$flaskURL/detect_drowsiness'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        print("Drowsiness check result: ${data.toString()}");
         if (data["drowsy"] == true) {
-          print("졸음 감지됨 → 타이머 자동 정지");
-          _stopTimer();
+          print("졸음 감지됨 → 팝업 알림 표시");
 
           showDialog(
             context: context,
             builder: (BuildContext context) {
               return AlertDialog(
                 title: Text("졸음 감지"),
-                content: Text("졸음이 감지되어 타이머가 정지되었습니다."),
+                content: Text("졸음이 감지되어 타이머가 자동으로 정지되었습니다."),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
@@ -96,8 +79,8 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
             },
           );
 
+          // 상태 초기화 요청
           await http.get(Uri.parse('$flaskURL/reset'));
-          print("Flask 상태 초기화됨");
         }
       }
     } catch (e) {
@@ -105,9 +88,15 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
     }
   }
 
-  String _formatDuration(Duration d) {
-    String two(int n) => n.toString().padLeft(2, "0");
-    return "${two(d.inHours)}:${two(d.inMinutes % 60)}:${two(d.inSeconds % 60)}";
+  void _manualReset() async {
+    try {
+      await http.get(Uri.parse('$flaskURL/reset'));
+      setState(() {
+        _formattedTime = "00:00:00";
+      });
+    } catch (e) {
+      print("Reset failed: $e");
+    }
   }
 
   @override
@@ -120,16 +109,10 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
           children: [
             Text(_formattedTime, style: TextStyle(fontSize: 48)),
             SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(onPressed: _startTimer, child: Text("Start")),
-                SizedBox(width: 10),
-                ElevatedButton(onPressed: _stopTimer, child: Text("Stop")),
-                SizedBox(width: 10),
-                ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
-              ],
-            )
+            ElevatedButton(
+              onPressed: _manualReset,
+              child: Text("Reset (앱에서)"),
+            ),
           ],
         ),
       ),
