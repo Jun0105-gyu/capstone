@@ -1,0 +1,14 @@
+import time
+from RPLCD.i2c import CharLCD
+
+try:
+    lcd = CharLCD('PCF8574', 0x27, auto_linebreaks=True)
+    lcd.clear()
+    for i in range(5):
+        t = time.strftime("%H:%M:%S")
+        lcd.write_string("Time:\n" + t)
+        print("LCD 표시됨:", t)
+        time.sleep(1)
+        lcd.clear()
+except Exception as e:
+    print("[LCD ERROR]", e)
