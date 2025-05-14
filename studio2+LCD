@@ -19,7 +19,7 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
   Stopwatch _stopwatch = Stopwatch();
   Timer? _timer;
   String _formattedTime = "00:00:00";
-  final String flaskURL = 'http://192.168.0.42:5000'; // ← 여기에 라즈베리파이 IP 넣기
+  final String flaskURL = 'http://192.168.137.69:5000'; // ← 여기에 라즈베리파이 IP 넣기
 
   void _startTimer() {
     if (!_stopwatch.isRunning) {
