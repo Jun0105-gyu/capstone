@@ -9,7 +9,7 @@ from RPLCD.i2c import CharLCD
 
 app = Flask(__name__)
 
-# LCD 초기화 (GPIO I2C 연결, 주소: 0x27)
+# LCD 초기화
 lcd = None
 try:
     lcd = CharLCD('PCF8574', 0x27, auto_linebreaks=True)
@@ -19,11 +19,12 @@ except Exception as e:
     print(f"[LCD INIT ERROR] {e}")
     lcd = None
 
-# 졸음 감지 관련 변수
+# 상태 변수
 drowsy = False
-drowsy_reason = ""
-alert_sent = False
+reason = ""
+already_alerted = False
 
+# 기준값
 EYE_THRESHOLD = 0.23
 EYE_DURATION = 5
 HAND_DURATION = 5
@@ -31,23 +32,33 @@ DROP_THRESHOLD = 30
 DROP_DURATION = 5
 FPS = 30
 
+# 타이머 시간 저장
+current_time_str = "00:00:00"
+
+# 시간 저장용 함수
+def update_lcd_time(time_str):
+    global current_time_str
+    current_time_str = time_str
+    if lcd:
+        lcd.clear()
+        lcd.write_string("Time:\n" + time_str)
+
+# MediaPipe 초기화
+mp_face_mesh = mp.solutions.face_mesh
+mp_hands = mp.solutions.hands
+face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
+hands = mp_hands.Hands()
+
+# 상태 변수
 eye_start_time = None
 hand_start_time = None
 head_start_time = None
 eye_condition = False
 hand_condition = False
 head_condition = False
-
 nose_y_history = []
 hand_10_history = []
-
 stop_flag = False
-
-# MediaPipe
-mp_face_mesh = mp.solutions.face_mesh
-mp_hands = mp.solutions.hands
-face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
-hands = mp_hands.Hands()
 
 def calculate_ear(landmarks, eye_indices):
     p = np.array([landmarks[i] for i in eye_indices])
@@ -63,9 +74,10 @@ def calculate_hand_movement(history):
     return sum(deltas) / len(deltas)
 
 def drowsiness_detection_loop():
-    global drowsy, eye_start_time, hand_start_time, head_start_time
+    global drowsy, reason, already_alerted
+    global eye_start_time, hand_start_time, head_start_time
     global eye_condition, hand_condition, head_condition
-    global nose_y_history, hand_10_history, stop_flag, drowsy_reason, alert_sent
+    global nose_y_history, hand_10_history, stop_flag
 
     cap = cv2.VideoCapture(0)
     while not stop_flag:
@@ -80,7 +92,7 @@ def drowsiness_detection_loop():
         current_time = time.time()
         h, w, _ = frame.shape
 
-        drowsy_reason = ""
+        reason = ""
 
         if face_results.multi_face_landmarks:
             for face_landmarks in face_results.multi_face_landmarks:
@@ -136,15 +148,15 @@ def drowsiness_detection_loop():
                 hand_start_time = None
                 hand_condition = False
 
-        if not alert_sent:
+        if not already_alerted:
             if (hand_condition and head_condition):
                 drowsy = True
-                drowsy_reason = "HAND + HEAD"
-                alert_sent = True
+                reason = "HAND + HEAD"
+                already_alerted = True
             elif (hand_condition and eye_condition):
                 drowsy = True
-                drowsy_reason = "HAND + EYE"
-                alert_sent = True
+                reason = "HAND + EYE"
+                already_alerted = True
             else:
                 drowsy = False
 
@@ -156,16 +168,29 @@ def drowsiness_detection_loop():
     cap.release()
     cv2.destroyAllWindows()
 
+@app.route("/update_time", methods=["POST"])
+def update_time():
+    data = request.json
+    time_str = data.get("time")
+    if time_str:
+        update_lcd_time(time_str)
+        return jsonify({"status": "success"})
+    return jsonify({"status": "fail"}), 400
+
 @app.route("/detect_drowsiness", methods=["GET"])
 def detect_drowsiness():
-    return jsonify({"drowsy": drowsy, "reason": drowsy_reason})
+    return jsonify({"drowsy": drowsy, "reason": reason})
 
 @app.route("/reset", methods=["GET"])
 def reset_status():
+    global drowsy, already_alerted, reason
     global eye_start_time, hand_start_time, head_start_time
     global eye_condition, hand_condition, head_condition
-    global nose_y_history, hand_10_history, drowsy, alert_sent, drowsy_reason
+    global nose_y_history, hand_10_history
 
+    drowsy = False
+    already_alerted = False
+    reason = ""
     eye_start_time = None
     hand_start_time = None
     head_start_time = None
@@ -174,27 +199,9 @@ def reset_status():
     head_condition = False
     nose_y_history.clear()
     hand_10_history.clear()
-    drowsy = False
-    drowsy_reason = ""
-    alert_sent = False
 
-    if lcd:
-        lcd.clear()
-        lcd.write_string("Drowsy Timer Ready")
-
+    update_lcd_time("00:00:00")
     return jsonify({"status": "reset"})
-
-@app.route("/update_time", methods=["POST"])
-def update_time():
-    data = request.json
-    time_str = data.get("time")
-    if lcd and time_str:
-        lcd.clear()
-        lcd.write_string("Time:\n" + time_str)
-        print(f"[LCD] Updated: {time_str}")
-        return jsonify({"status": "success"})
-    else:
-        return jsonify({"status": "fail"}), 400
 
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop).start()
