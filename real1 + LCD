@@ -19,7 +19,21 @@ except Exception as e:
     print(f"[LCD INIT ERROR] {e}")
     lcd = None
 
-# 상태 변수
+# LCD 시간 업데이트 관련
+current_time_str = "00:00:00"
+last_lcd_update = 0
+
+def update_lcd_time(time_str):
+    global current_time_str, last_lcd_update
+    now = time.time()
+    if now - last_lcd_update >= 1:  # 1초에 한 번만 LCD 갱신
+        current_time_str = time_str
+        if lcd:
+            lcd.clear()
+            lcd.write_string("Time:\n" + time_str)
+        last_lcd_update = now
+
+# 졸음 감지 변수
 drowsy = False
 reason = ""
 already_alerted = False
@@ -32,23 +46,6 @@ DROP_THRESHOLD = 30
 DROP_DURATION = 5
 FPS = 30
 
-# 타이머 시간 저장
-current_time_str = "00:00:00"
-
-# 시간 저장용 함수
-def update_lcd_time(time_str):
-    global current_time_str
-    current_time_str = time_str
-    if lcd:
-        lcd.clear()
-        lcd.write_string("Time:\n" + time_str)
-
-# MediaPipe 초기화
-mp_face_mesh = mp.solutions.face_mesh
-mp_hands = mp.solutions.hands
-face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
-hands = mp_hands.Hands()
-
 # 상태 변수
 eye_start_time = None
 hand_start_time = None
@@ -59,6 +56,23 @@ head_condition = False
 nose_y_history = []
 hand_10_history = []
 stop_flag = False
+
+# MediaPipe 초기화
+mp_face_mesh = mp.solutions.face_mesh
+mp_hands = mp.solutions.hands
+face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=False,
+    max_num_faces=1,
+    refine_landmarks=True,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+hands = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=1,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
 def calculate_ear(landmarks, eye_indices):
     p = np.array([landmarks[i] for i in eye_indices])
@@ -80,6 +94,10 @@ def drowsiness_detection_loop():
     global nose_y_history, hand_10_history, stop_flag
 
     cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("[ERROR] Camera not detected")
+        return
+
     while not stop_flag:
         success, frame = cap.read()
         if not success:
@@ -95,6 +113,7 @@ def drowsiness_detection_loop():
         reason = ""
 
         if face_results.multi_face_landmarks:
+            print("[FACE] 인식됨")
             for face_landmarks in face_results.multi_face_landmarks:
                 landmarks = [(int(lm.x * w), int(lm.y * h)) for lm in face_landmarks.landmark]
 
@@ -109,6 +128,7 @@ def drowsiness_detection_loop():
                         eye_start_time = current_time
                     elif current_time - eye_start_time >= EYE_DURATION:
                         eye_condition = True
+                        print("[EYE] Drowsiness detected.")
                 else:
                     eye_start_time = None
                     eye_condition = False
@@ -121,16 +141,21 @@ def drowsiness_detection_loop():
                 if len(nose_y_history) >= FPS * 6:
                     baseline_y = sum(nose_y_history[:FPS]) / FPS
                     dy = nose_y - baseline_y
+                    print(f"[HEAD] DY: {dy:.2f}")
                     if dy > DROP_THRESHOLD:
                         if head_start_time is None:
                             head_start_time = current_time
                         elif current_time - head_start_time >= DROP_DURATION:
                             head_condition = True
+                            print("[HEAD] Drowsiness detected.")
                     else:
                         head_start_time = None
                         head_condition = False
+        else:
+            print("[FACE] 인식 실패")
 
         if hand_results.multi_hand_landmarks:
+            print("[HAND] 인식됨")
             for hand_landmarks in hand_results.multi_hand_landmarks:
                 x = int(hand_landmarks.landmark[10].x * w)
                 y = int(hand_landmarks.landmark[10].y * h)
@@ -139,24 +164,30 @@ def drowsiness_detection_loop():
                     hand_10_history.pop(0)
 
             movement = calculate_hand_movement(hand_10_history)
+            print(f"[HAND] Movement: {movement:.2f}")
             if movement < 40:
                 if hand_start_time is None:
                     hand_start_time = current_time
                 elif current_time - hand_start_time >= HAND_DURATION:
                     hand_condition = True
+                    print("[HAND] Drowsiness detected.")
             else:
                 hand_start_time = None
                 hand_condition = False
+        else:
+            print("[HAND] 인식 실패")
 
         if not already_alerted:
             if (hand_condition and head_condition):
                 drowsy = True
                 reason = "HAND + HEAD"
                 already_alerted = True
+                print("=== 졸음 감지: HAND + HEAD ===")
             elif (hand_condition and eye_condition):
                 drowsy = True
                 reason = "HAND + EYE"
                 already_alerted = True
+                print("=== 졸음 감지: HAND + EYE ===")
             else:
                 drowsy = False
 
