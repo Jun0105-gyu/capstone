@@ -18,7 +18,7 @@ class DrowsinessTimerPage extends StatefulWidget {
 class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
   Timer? _pollingTimer;
   String _formattedTime = "00:00:00";
-  final String flaskURL = 'http://192.168.137.69:5000'; // ← 너의 Flask 주소
+  final String flaskURL = 'http://192.168.137.69:5000'; // ← Flask 서버 IP 주소
 
   @override
   void initState() {
@@ -79,7 +79,6 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
             },
           );
 
-          // 상태 초기화 요청
           await http.get(Uri.parse('$flaskURL/reset'));
         }
       }
@@ -88,12 +87,37 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
     }
   }
 
-  void _manualReset() async {
+  Future<void> _startFlaskTimer() async {
     try {
-      await http.get(Uri.parse('$flaskURL/reset'));
-      setState(() {
-        _formattedTime = "00:00:00";
-      });
+      final res = await http.get(Uri.parse('$flaskURL/start'));
+      if (res.statusCode == 200) {
+        print("Flask 타이머 시작");
+      }
+    } catch (e) {
+      print("Start failed: $e");
+    }
+  }
+
+  Future<void> _stopFlaskTimer() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/stop'));
+      if (res.statusCode == 200) {
+        print("Flask 타이머 정지");
+      }
+    } catch (e) {
+      print("Stop failed: $e");
+    }
+  }
+
+  Future<void> _resetFlaskTimer() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/reset'));
+      if (res.statusCode == 200) {
+        setState(() {
+          _formattedTime = "00:00:00";
+        });
+        print("Flask 타이머 초기화");
+      }
     } catch (e) {
       print("Reset failed: $e");
     }
@@ -109,9 +133,15 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
           children: [
             Text(_formattedTime, style: TextStyle(fontSize: 48)),
             SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _manualReset,
-              child: Text("Reset (앱에서)"),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(onPressed: _startFlaskTimer, child: Text("Start")),
+                SizedBox(width: 10),
+                ElevatedButton(onPressed: _stopFlaskTimer, child: Text("Stop")),
+                SizedBox(width: 10),
+                ElevatedButton(onPressed: _resetFlaskTimer, child: Text("Reset")),
+              ],
             ),
           ],
         ),
