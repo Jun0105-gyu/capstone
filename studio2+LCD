@@ -1,60 +1,70 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'dart:async';
-import 'package:audioplayers/audioplayers.dart';
+import 'dart:convert';
+import 'package:drowsy_timer/stats/statistics_page.dart';
 
 void main() {
-  runApp(MaterialApp(
-    title: 'Drowsiness Timer',
-    home: DrowsinessTimerPage(),
-  ));
+  runApp(DrowsinessApp());
 }
 
-class DrowsinessTimerPage extends StatefulWidget {
+class DrowsinessApp extends StatelessWidget {
   @override
-  _DrowsinessTimerPageState createState() => _DrowsinessTimerPageState();
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Drowsiness Timer',
+      home: StopwatchPage(),
+    );
+  }
 }
 
-class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
-  Stopwatch _stopwatch = Stopwatch();
-  Timer? _timer;
-  String _formattedTime = "00:00:00";
-  final String flaskURL = 'http://192.168.137.69:5000'; // 사용자의 Raspberry Pi 주소
-  bool isDrowsy = false;
-  AudioPlayer? _audioPlayer;
+class StopwatchPage extends StatefulWidget {
+  @override
+  _StopwatchPageState createState() => _StopwatchPageState();
+}
 
-  void _startTimer() {
-    if (!_stopwatch.isRunning) {
-      _stopwatch.start();
-      _timer = Timer.periodic(Duration(seconds: 1), (timer) async {
-        setState(() {
-          _formattedTime = _formatDuration(_stopwatch.elapsed);
-        });
-        await sendTimeToFlask(_formattedTime);
-        await checkDrowsiness();
-      });
-    }
+class _StopwatchPageState extends State<StopwatchPage> {
+  String _time = "00:00:00";
+  Timer? _timer;
+  bool _isRunning = false;
+  String flaskURL = "http://라즈베리파이IP:5000"; // 꼭 본인 IP로 바꾸세요
+
+  void _startTimer() async {
+    await http.get(Uri.parse('$flaskURL/start'));
+    _isRunning = true;
+    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      _fetchTime();
+    });
   }
 
-  void _stopTimer() {
-    _stopwatch.stop();
+  void _stopTimer() async {
+    await http.get(Uri.parse('$flaskURL/stop'));
+    _isRunning = false;
     _timer?.cancel();
-    sendTimeToFlask(_formattedTime);
   }
 
   void _resetTimer() async {
-    _stopwatch.reset();
-    setState(() {
-      _formattedTime = "00:00:00";
-    });
-    _stopwatch.stop();
-    _timer?.cancel();
-    _timer = null;
     await http.get(Uri.parse('$flaskURL/reset'));
+    setState(() {
+      _time = "00:00:00";
+    });
   }
 
-  Future<void> sendTimeToFlask(String time) async {
+  void _fetchTime() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/get_time'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          _time = data['time'];
+        });
+      }
+    } catch (e) {
+      print("Error fetching time: $e");
+    }
+  }
+
+  void _sendTimeToFlask(String time) async {
     try {
       final res = await http.post(
         Uri.parse('$flaskURL/update_time'),
@@ -69,81 +79,48 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
     }
   }
 
-  Future<void> checkDrowsiness() async {
-    try {
-      final res = await http.get(Uri.parse('$flaskURL/detect_drowsiness'));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data["drowsy"] == true && !isDrowsy) {
-          isDrowsy = true;
-          _stopTimer();
-          playAlertLoop();
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (_) => AlertDialog(
-              title: Text("Drowsiness Detected!"),
-              content: Text("졸음이 감지되었습니다."),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    stopAlert();
-                    Navigator.pop(context);
-                    isDrowsy = false;
-                  },
-                  child: Text("확인"),
-                )
-              ],
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      print("Failed to check drowsiness: $e");
-    }
-  }
-
-  void playAlertLoop() async {
-    _audioPlayer = AudioPlayer();
-    await _audioPlayer!.setReleaseMode(ReleaseMode.loop);
-    await _audioPlayer!.play(AssetSource('sound/alert.mp3'));
-  }
-
-  void stopAlert() async {
-    if (_audioPlayer != null) {
-      await _audioPlayer!.stop();
-      await _audioPlayer!.dispose();
-      _audioPlayer = null;
-    }
-  }
-
-  String _formatDuration(Duration d) {
-    String two(int n) => n.toString().padLeft(2, "0");
-    return "${two(d.inHours)}:${two(d.inMinutes % 60)}:${two(d.inSeconds % 60)}";
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Drowsiness Timer')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(_formattedTime, style: TextStyle(fontSize: 48)),
-            SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(onPressed: _startTimer, child: Text("Start")),
-                SizedBox(width: 10),
-                ElevatedButton(onPressed: _stopTimer, child: Text("Stop")),
-                SizedBox(width: 10),
-                ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
-              ],
-            )
-          ],
-        ),
+      appBar: AppBar(title: Text("Drowsiness Timer")),
+      body: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(_time, style: TextStyle(fontSize: 48)),
+          SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(onPressed: _startTimer, child: Text("Start")),
+              SizedBox(width: 10),
+              ElevatedButton(
+                onPressed: () {
+                  _stopTimer();
+                  _sendTimeToFlask(_time);
+                },
+                child: Text("Stop"),
+              ),
+              SizedBox(width: 10),
+              ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
+            ],
+          ),
+          SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => StatisticsPage()),
+              );
+            },
+            child: Text("통계 보기"),
+          ),
+        ],
       ),
     );
   }
