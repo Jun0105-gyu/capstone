@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:vibration/vibration.dart';
-import 'dart:async';
 import 'dart:convert';
+import 'dart:async';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() {
   runApp(MaterialApp(
@@ -17,42 +17,55 @@ class DrowsinessTimerPage extends StatefulWidget {
 }
 
 class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
-  Timer? _pollingTimer;
-  Timer? _vibrationTimer;
+  Stopwatch _stopwatch = Stopwatch();
+  Timer? _timer;
   String _formattedTime = "00:00:00";
-  final String flaskURL = 'http://192.168.137.69:5000'; // ← 너의 라즈베리파이 IP로 맞추기
+  final String flaskURL = 'http://192.168.137.69:5000'; // 사용자의 Raspberry Pi 주소
+  bool isDrowsy = false;
+  AudioPlayer? _audioPlayer;
 
-  @override
-  void initState() {
-    super.initState();
-    _startPollingFlaskTime();
-  }
-
-  @override
-  void dispose() {
-    _pollingTimer?.cancel();
-    _vibrationTimer?.cancel();
-    super.dispose();
-  }
-
-  void _startPollingFlaskTime() {
-    _pollingTimer = Timer.periodic(Duration(seconds: 1), (timer) async {
-      await fetchTimeFromFlask();
-      await checkDrowsiness();
-    });
-  }
-
-  Future<void> fetchTimeFromFlask() async {
-    try {
-      final res = await http.get(Uri.parse('$flaskURL/get_time'));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
+  void _startTimer() {
+    if (!_stopwatch.isRunning) {
+      _stopwatch.start();
+      _timer = Timer.periodic(Duration(seconds: 1), (timer) async {
         setState(() {
-          _formattedTime = data["time"];
+          _formattedTime = _formatDuration(_stopwatch.elapsed);
         });
+        await sendTimeToFlask(_formattedTime);
+        await checkDrowsiness();
+      });
+    }
+  }
+
+  void _stopTimer() {
+    _stopwatch.stop();
+    _timer?.cancel();
+    sendTimeToFlask(_formattedTime);
+  }
+
+  void _resetTimer() async {
+    _stopwatch.reset();
+    setState(() {
+      _formattedTime = "00:00:00";
+    });
+    _stopwatch.stop();
+    _timer?.cancel();
+    _timer = null;
+    await http.get(Uri.parse('$flaskURL/reset'));
+  }
+
+  Future<void> sendTimeToFlask(String time) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$flaskURL/update_time'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"time": time}),
+      );
+      if (res.statusCode != 200) {
+        print("Failed to send time: ${res.statusCode}");
       }
     } catch (e) {
-      print("Time fetch error: $e");
+      print("Failed to send time: $e");
     }
   }
 
@@ -61,73 +74,52 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
       final res = await http.get(Uri.parse('$flaskURL/detect_drowsiness'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (data["drowsy"] == true) {
-          print("졸음 감지됨 → 반복 진동 + 팝업");
-
-          // 진동 주기적으로 울림
-          _vibrationTimer = Timer.periodic(Duration(milliseconds: 1500), (_) async {
-            if (await Vibration.hasVibrator() ?? false) {
-              Vibration.vibrate(duration: 1000);
-            }
-          });
-
-          // 팝업 알림 (확인 전까지 진동 멈추지 않음)
+        if (data["drowsy"] == true && !isDrowsy) {
+          isDrowsy = true;
+          _stopTimer();
+          playAlertLoop();
           showDialog(
             context: context,
             barrierDismissible: false,
-            builder: (BuildContext context) {
-              return AlertDialog(
-                title: Text("졸음 감지"),
-                content: Text("졸음이 감지되었습니다.\n확인을 누르면 진동이 멈춥니다."),
-                actions: [
-                  TextButton(
-                    onPressed: () async {
-                      _vibrationTimer?.cancel();
-                      _vibrationTimer = null;
-                      Navigator.of(context).pop();
-
-                      await http.get(Uri.parse('$flaskURL/reset'));
-                    },
-                    child: Text("확인"),
-                  ),
-                ],
-              );
-            },
+            builder: (_) => AlertDialog(
+              title: Text("Drowsiness Detected!"),
+              content: Text("졸음이 감지되었습니다."),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    stopAlert();
+                    Navigator.pop(context);
+                    isDrowsy = false;
+                  },
+                  child: Text("확인"),
+                )
+              ],
+            ),
           );
         }
       }
     } catch (e) {
-      print("Drowsiness check error: $e");
+      print("Failed to check drowsiness: $e");
     }
   }
 
-  Future<void> _startFlaskTimer() async {
-    try {
-      await http.get(Uri.parse('$flaskURL/start'));
-    } catch (e) {
-      print("Start error: $e");
+  void playAlertLoop() async {
+    _audioPlayer = AudioPlayer();
+    await _audioPlayer!.setReleaseMode(ReleaseMode.loop);
+    await _audioPlayer!.play(AssetSource('sound/alert.mp3'));
+  }
+
+  void stopAlert() async {
+    if (_audioPlayer != null) {
+      await _audioPlayer!.stop();
+      await _audioPlayer!.dispose();
+      _audioPlayer = null;
     }
   }
 
-  Future<void> _stopFlaskTimer() async {
-    try {
-      await http.get(Uri.parse('$flaskURL/stop'));
-    } catch (e) {
-      print("Stop error: $e");
-    }
-  }
-
-  Future<void> _resetFlaskTimer() async {
-    try {
-      final res = await http.get(Uri.parse('$flaskURL/reset'));
-      if (res.statusCode == 200) {
-        setState(() {
-          _formattedTime = "00:00:00";
-        });
-      }
-    } catch (e) {
-      print("Reset error: $e");
-    }
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, "0");
+    return "${two(d.inHours)}:${two(d.inMinutes % 60)}:${two(d.inSeconds % 60)}";
   }
 
   @override
@@ -143,13 +135,13 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                ElevatedButton(onPressed: _startFlaskTimer, child: Text("Start")),
+                ElevatedButton(onPressed: _startTimer, child: Text("Start")),
                 SizedBox(width: 10),
-                ElevatedButton(onPressed: _stopFlaskTimer, child: Text("Stop")),
+                ElevatedButton(onPressed: _stopTimer, child: Text("Stop")),
                 SizedBox(width: 10),
-                ElevatedButton(onPressed: _resetFlaskTimer, child: Text("Reset")),
+                ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
               ],
-            ),
+            )
           ],
         ),
       ),
