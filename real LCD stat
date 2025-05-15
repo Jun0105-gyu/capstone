@@ -32,8 +32,7 @@ def update_lcd_time(time_str):
     current_time_str = time_str
     if lcd:
         lcd.clear()
-        lcd.write_string("Time:
-" + time_str)
+        lcd.write_string("Time:\n" + time_str)
 
 def timer_loop():
     global current_time_str
