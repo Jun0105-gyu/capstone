@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:vibration/vibration.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -17,8 +18,9 @@ class DrowsinessTimerPage extends StatefulWidget {
 
 class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
   Timer? _pollingTimer;
+  Timer? _vibrationTimer;
   String _formattedTime = "00:00:00";
-  final String flaskURL = 'http://192.168.137.69:5000'; // ← Flask 서버 IP 주소
+  final String flaskURL = 'http://192.168.137.69:5000'; // ← 너의 라즈베리파이 IP로 맞추기
 
   @override
   void initState() {
@@ -29,6 +31,7 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
   @override
   void dispose() {
     _pollingTimer?.cancel();
+    _vibrationTimer?.cancel();
     super.dispose();
   }
 
@@ -47,11 +50,9 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
         setState(() {
           _formattedTime = data["time"];
         });
-      } else {
-        print("Failed to get time: ${res.statusCode}");
       }
     } catch (e) {
-      print("Error fetching time: $e");
+      print("Time fetch error: $e");
     }
   }
 
@@ -61,51 +62,58 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data["drowsy"] == true) {
-          print("졸음 감지됨 → 팝업 알림 표시");
+          print("졸음 감지됨 → 반복 진동 + 팝업");
 
+          // 진동 주기적으로 울림
+          _vibrationTimer = Timer.periodic(Duration(milliseconds: 1500), (_) async {
+            if (await Vibration.hasVibrator() ?? false) {
+              Vibration.vibrate(duration: 1000);
+            }
+          });
+
+          // 팝업 알림 (확인 전까지 진동 멈추지 않음)
           showDialog(
             context: context,
+            barrierDismissible: false,
             builder: (BuildContext context) {
               return AlertDialog(
                 title: Text("졸음 감지"),
-                content: Text("졸음이 감지되어 타이머가 자동으로 정지되었습니다."),
+                content: Text("졸음이 감지되었습니다.\n확인을 누르면 진동이 멈춥니다."),
                 actions: [
                   TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () async {
+                      _vibrationTimer?.cancel();
+                      _vibrationTimer = null;
+                      Navigator.of(context).pop();
+
+                      await http.get(Uri.parse('$flaskURL/reset'));
+                    },
                     child: Text("확인"),
                   ),
                 ],
               );
             },
           );
-
-          await http.get(Uri.parse('$flaskURL/reset'));
         }
       }
     } catch (e) {
-      print("Error checking drowsiness: $e");
+      print("Drowsiness check error: $e");
     }
   }
 
   Future<void> _startFlaskTimer() async {
     try {
-      final res = await http.get(Uri.parse('$flaskURL/start'));
-      if (res.statusCode == 200) {
-        print("Flask 타이머 시작");
-      }
+      await http.get(Uri.parse('$flaskURL/start'));
     } catch (e) {
-      print("Start failed: $e");
+      print("Start error: $e");
     }
   }
 
   Future<void> _stopFlaskTimer() async {
     try {
-      final res = await http.get(Uri.parse('$flaskURL/stop'));
-      if (res.statusCode == 200) {
-        print("Flask 타이머 정지");
-      }
+      await http.get(Uri.parse('$flaskURL/stop'));
     } catch (e) {
-      print("Stop failed: $e");
+      print("Stop error: $e");
     }
   }
 
@@ -116,10 +124,9 @@ class _DrowsinessTimerPageState extends State<DrowsinessTimerPage> {
         setState(() {
           _formattedTime = "00:00:00";
         });
-        print("Flask 타이머 초기화");
       }
     } catch (e) {
-      print("Reset failed: $e");
+      print("Reset error: $e");
     }
   }
 
