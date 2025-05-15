@@ -36,7 +36,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
   void initState() {
     super.initState();
     _audioPlayer = AudioPlayer();
-    _resetServer(); // 앱 실행 시 초기화
+    _resetServer(); // 앱 실행 시 서버 상태 초기화
     _startMonitoring();
   }
 
@@ -93,7 +93,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
           TextButton(
             onPressed: () {
               _stopAlarm();
-              _resetServer();
+              // _resetServer();  // 삭제: 타이머 상태 초기화 방지
               _isDrowsy = false;
               Navigator.of(context).pop();
             },
