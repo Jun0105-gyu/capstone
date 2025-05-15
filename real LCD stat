@@ -57,12 +57,8 @@ def monitor_buttons():
     while True:
         if GPIO.input(17) == GPIO.HIGH:
             print("[BUTTON] START")
-            if not timer_running:
-                timer_running = True
-                if stopwatch_start_time is None:
-                    stopwatch_start_time = time.time()
-                else:
-                    stopwatch_start_time = time.time() - elapsed_before_stop
+            timer_running = True
+            stopwatch_start_time = time.time() - elapsed_before_stop
             time.sleep(0.3)
         elif GPIO.input(27) == GPIO.HIGH:
             print("[BUTTON] STOP")
@@ -147,8 +143,9 @@ def drowsiness_detection_loop():
                     if eye_start_time is None:
                         eye_start_time = current_time
                     else:
-                        print(f"[EYE] EAR 조건 유지 시간: {current_time - eye_start_time:.1f}초")
-                        if current_time - eye_start_time >= 5:
+                        duration = current_time - eye_start_time
+                        print(f"[EYE] EAR 조건 유지 시간: {duration:.1f}초")
+                        if duration >= 5:
                             eye_condition = True
                 else:
                     eye_start_time = None
@@ -167,8 +164,9 @@ def drowsiness_detection_loop():
                         if head_start_time is None:
                             head_start_time = current_time
                         else:
-                            print(f"[HEAD] DY 조건 유지 시간: {current_time - head_start_time:.1f}초")
-                            if current_time - head_start_time >= 4:
+                            duration = current_time - head_start_time
+                            print(f"[HEAD] DY 조건 유지 시간: {duration:.1f}초")
+                            if duration >= 4:
                                 head_condition = True
                     else:
                         head_start_time = None
@@ -188,8 +186,9 @@ def drowsiness_detection_loop():
                 if hand_start_time is None:
                     hand_start_time = current_time
                 else:
-                    print(f"[HAND] Movement 조건 유지 시간: {current_time - hand_start_time:.1f}초")
-                    if current_time - hand_start_time >= 4:
+                    duration = current_time - hand_start_time
+                    print(f"[HAND] Movement 조건 유지 시간: {duration:.1f}초")
+                    if duration >= 4:
                         hand_condition = True
             else:
                 hand_start_time = None
@@ -199,13 +198,13 @@ def drowsiness_detection_loop():
             if hand_condition and head_condition:
                 drowsy = True
                 reason = "HAND + HEAD"
+                print("=== DROWSINESS DETECTED: HAND + HEAD ===")
                 already_alerted = True
-                print(f"=== DROWSINESS DETECTED: {reason} ===")
             elif hand_condition and eye_condition:
                 drowsy = True
                 reason = "HAND + EYE"
+                print("=== DROWSINESS DETECTED: HAND + EYE ===")
                 already_alerted = True
-                print(f"=== DROWSINESS DETECTED: {reason} ===")
             else:
                 drowsy = False
 
@@ -217,8 +216,6 @@ def drowsiness_detection_loop():
     cap.release()
     cv2.destroyAllWindows()
 
-# === API ===
-
 @app.route("/get_time", methods=["GET"])
 def get_time():
     return jsonify({"time": current_time_str})
@@ -228,10 +225,7 @@ def start_timer():
     global timer_running, stopwatch_start_time, elapsed_before_stop
     if not timer_running:
         timer_running = True
-        if stopwatch_start_time is None:
-            stopwatch_start_time = time.time()
-        else:
-            stopwatch_start_time = time.time() - elapsed_before_stop
+        stopwatch_start_time = time.time() - elapsed_before_stop
         print("[API] Timer started")
     return jsonify({"status": "started"})
 
@@ -274,8 +268,20 @@ def reset_status():
     print("[RESET] System reset")
     return jsonify({"status": "reset"})
 
+@app.route("/update_time", methods=["POST"])
+def update_time():
+    data = request.get_json()
+    time_str = data.get("time", "")
+    if not time_str:
+        return jsonify({"status": "error", "message": "No time provided"}), 400
+
+    print(f"[RECEIVED TIME] {time_str}")
+    try:
+        with open("recorded_times.txt", "a") as f:
+            f.write(time_str + "\n")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"[WRITE ERROR] {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
-    threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
-    threading.Thread(target=monitor_buttons, daemon=True).start()
-    threading.Thread(target=timer_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=5000)
