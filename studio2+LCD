@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
+import 'package:drowsy_timer/stats/statistics_page.dart'; // 통계 페이지 연결
 
 void main() {
   runApp(DrowsinessApp());
@@ -28,7 +29,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
   bool _isRunning = false;
   bool isDrowsy = false;
 
-  final String flaskURL = "http://192.168.137.69:5000"; // ← 본인의 Flask IP
+  final String flaskURL = "http://192.168.137.69:5000"; // ← 본인의 Flask IP로 수정
 
   @override
   void initState() {
@@ -41,7 +42,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
       final res = await http.get(Uri.parse('$flaskURL/reset'));
       print("[APP] 서버 초기화 완료: ${res.statusCode}");
     } catch (e) {
-      print("[APP] 서버 초기화 실패: $e");
+      print("[APP ERROR] 서버 초기화 실패: $e");
     }
   }
 
@@ -102,17 +103,17 @@ class _StopwatchPageState extends State<StopwatchPage> {
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        title: Text("졸음 감지!"),
+        title: Text("졸음 감지됨"),
         content: Text("졸음이 감지되었습니다."),
         actions: [
           TextButton(
             onPressed: () async {
-              await _resetServer(); // 팝업 확인 시 서버 초기화
+              await _resetServer(); // 팝업에서 확인 시 서버 상태 초기화
               setState(() => isDrowsy = false);
               Navigator.of(context).pop();
             },
             child: Text("확인"),
-          ),
+          )
         ],
       ),
     );
@@ -142,6 +143,16 @@ class _StopwatchPageState extends State<StopwatchPage> {
               SizedBox(width: 10),
               ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
             ],
+          ),
+          SizedBox(height: 30),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => StatisticsPage()),
+              );
+            },
+            child: Text("통계 보기"),
           ),
         ],
       ),
