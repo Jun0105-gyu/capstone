@@ -24,6 +24,7 @@ except Exception as e:
 timer_running = False
 stopwatch_start_time = None
 current_time_str = "00:00:00"
+elapsed_before_stop = 0  # <<< 핵심 변수 추가
 
 def update_lcd_time(time_str):
     global current_time_str
@@ -35,7 +36,7 @@ def update_lcd_time(time_str):
 def timer_loop():
     global current_time_str
     while True:
-        if timer_running and stopwatch_start_time:
+        if timer_running and stopwatch_start_time is not None:
             elapsed = time.time() - stopwatch_start_time
             h = int(elapsed // 3600)
             m = int((elapsed % 3600) // 60)
@@ -51,22 +52,24 @@ GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Stop
 GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Reset
 
 def monitor_buttons():
-    global timer_running, stopwatch_start_time
+    global timer_running, stopwatch_start_time, elapsed_before_stop
     while True:
         if GPIO.input(17) == GPIO.HIGH:
             print("[BUTTON] START")
             timer_running = True
-            if stopwatch_start_time is None:
-                stopwatch_start_time = time.time()
+            stopwatch_start_time = time.time() - elapsed_before_stop
             time.sleep(0.3)
         elif GPIO.input(27) == GPIO.HIGH:
             print("[BUTTON] STOP")
+            if stopwatch_start_time is not None:
+                elapsed_before_stop = time.time() - stopwatch_start_time
             timer_running = False
             time.sleep(0.3)
         elif GPIO.input(22) == GPIO.HIGH:
             print("[BUTTON] RESET")
             timer_running = False
             stopwatch_start_time = None
+            elapsed_before_stop = 0
             update_lcd_time("00:00:00")
             time.sleep(0.3)
         time.sleep(0.05)
@@ -206,33 +209,23 @@ def get_time():
 
 @app.route("/start", methods=["GET"])
 def start_timer():
-    global timer_running, stopwatch_start_time
+    global timer_running, stopwatch_start_time, elapsed_before_stop
     timer_running = True
-    if stopwatch_start_time is None:
-        stopwatch_start_time = time.time()
+    stopwatch_start_time = time.time() - elapsed_before_stop
     print("[API] Timer started")
     return jsonify({"status": "started"})
 
 @app.route("/stop", methods=["GET"])
 def stop_timer():
-    global timer_running
+    global timer_running, elapsed_before_stop
+    if stopwatch_start_time is not None:
+        elapsed_before_stop = time.time() - stopwatch_start_time
     timer_running = False
     print("[API] Timer stopped")
     return jsonify({"status": "stopped"})
 
-@app.route("/update_time", methods=["POST"])
-def update_time():
-    data = request.json
-    time_str = data.get("time")
-    if time_str:
-        print(f"[LCD] update_time called with: {time_str}")
-        update_lcd_time(time_str)
-        return jsonify({"status": "success"})
-    return jsonify({"status": "fail"}), 400
-
 @app.route("/detect_drowsiness", methods=["GET"])
 def detect_drowsiness():
-    print(f"[DETECT API] drowsy={drowsy}, reason={reason}")
     return jsonify({"drowsy": drowsy, "reason": reason})
 
 @app.route("/reset", methods=["GET"])
@@ -241,7 +234,7 @@ def reset_status():
     global eye_start_time, hand_start_time, head_start_time
     global eye_condition, hand_condition, head_condition
     global nose_y_history, hand_10_history
-    global timer_running, stopwatch_start_time
+    global timer_running, stopwatch_start_time, elapsed_before_stop
 
     drowsy = False
     already_alerted = False
@@ -256,11 +249,12 @@ def reset_status():
     hand_10_history.clear()
     timer_running = False
     stopwatch_start_time = None
+    elapsed_before_stop = 0
     update_lcd_time("00:00:00")
     print("[RESET] System reset")
     return jsonify({"status": "reset"})
 
-# === 실행 ===
+# 실행
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
     threading.Thread(target=monitor_buttons, daemon=True).start()
