@@ -20,7 +20,7 @@ except Exception as e:
     print(f"[LCD INIT ERROR] {e}")
     lcd = None
 
-# 타이머 관련 변수
+# 타이머 변수
 timer_running = False
 stopwatch_start_time = None
 current_time_str = "00:00:00"
@@ -34,7 +34,7 @@ def update_lcd_time(time_str):
         lcd.write_string("Time:\n" + time_str)
 
 def timer_loop():
-    global current_time_str, stopwatch_start_time, timer_running
+    global current_time_str
     while True:
         if timer_running and stopwatch_start_time is not None:
             elapsed = time.time() - stopwatch_start_time
@@ -47,9 +47,9 @@ def timer_loop():
 
 # 버튼 설정
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Start
-GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Stop
-GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Reset
+GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 def monitor_buttons():
     global timer_running, stopwatch_start_time, elapsed_before_stop
@@ -138,11 +138,83 @@ def drowsiness_detection_loop():
                 ear = (left_ear + right_ear) / 2.0
                 print(f"[EYE] EAR: {ear:.3f}")
 
-        time.sleep(0.1)
+                if ear < 0.23:
+                    if eye_start_time is None:
+                        eye_start_time = current_time
+                    else:
+                        duration = current_time - eye_start_time
+                        print(f"[EYE] EAR 조건 유지 시간: {duration:.1f}초")
+                        if duration >= 3:
+                            eye_condition = True
+                else:
+                    eye_start_time = None
+                    eye_condition = False
+
+                nose_y = landmarks[1][1]
+                nose_y_history.append(nose_y)
+                if len(nose_y_history) > 180:
+                    nose_y_history.pop(0)
+
+                if len(nose_y_history) >= 150:
+                    baseline_y = sum(nose_y_history[:30]) / 30
+                    dy = nose_y - baseline_y
+                    print(f"[HEAD] DY: {dy:.2f}")
+                    if dy > 20:
+                        if head_start_time is None:
+                            head_start_time = current_time
+                        else:
+                            duration = current_time - head_start_time
+                            print(f"[HEAD] DY 조건 유지 시간: {duration:.1f}초")
+                            if duration >= 3:
+                                head_condition = True
+                    else:
+                        head_start_time = None
+                        head_condition = False
+
+        if hand_results.multi_hand_landmarks:
+            for hand_landmarks in hand_results.multi_hand_landmarks:
+                x = int(hand_landmarks.landmark[10].x * w)
+                y = int(hand_landmarks.landmark[10].y * h)
+                hand_10_history.append((x, y))
+                if len(hand_10_history) > 150:
+                    hand_10_history.pop(0)
+
+            movement = calculate_hand_movement(hand_10_history)
+            print(f"[HAND] Movement: {movement:.2f}")
+            if movement < 50:
+                if hand_start_time is None:
+                    hand_start_time = current_time
+                else:
+                    duration = current_time - hand_start_time
+                    print(f"[HAND] Movement 조건 유지 시간: {duration:.1f}초")
+                    if duration >= 3:
+                        hand_condition = True
+            else:
+                hand_start_time = None
+                hand_condition = False
+
+        if not already_alerted:
+            if hand_condition and head_condition:
+                drowsy = True
+                reason = "HAND + HEAD"
+                already_alerted = True
+                print("=== DROWSINESS DETECTED: HAND + HEAD ===")
+            elif hand_condition and eye_condition:
+                drowsy = True
+                reason = "HAND + EYE"
+                already_alerted = True
+                print("=== DROWSINESS DETECTED: HAND + EYE ===")
+            else:
+                drowsy = False
+
+        cv2.imshow("Camera Preview", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            stop_flag = True
+            break
+
     cap.release()
     cv2.destroyAllWindows()
 
-# === API ===
 @app.route("/get_time", methods=["GET"])
 def get_time():
     return jsonify({"time": current_time_str})
@@ -150,9 +222,10 @@ def get_time():
 @app.route("/start", methods=["GET"])
 def start_timer():
     global timer_running, stopwatch_start_time, elapsed_before_stop
-    timer_running = True
-    stopwatch_start_time = time.time() - elapsed_before_stop
-    print("[API] Timer started")
+    if not timer_running:
+        timer_running = True
+        stopwatch_start_time = time.time() - elapsed_before_stop
+        print("[API] Timer started")
     return jsonify({"status": "started"})
 
 @app.route("/stop", methods=["GET"])
@@ -163,6 +236,10 @@ def stop_timer():
     timer_running = False
     print("[API] Timer stopped")
     return jsonify({"status": "stopped"})
+
+@app.route("/detect_drowsiness", methods=["GET"])
+def detect_drowsiness():
+    return jsonify({"drowsy": drowsy, "reason": reason})
 
 @app.route("/reset", methods=["GET"])
 def reset_status():
@@ -190,7 +267,21 @@ def reset_status():
     print("[RESET] System reset")
     return jsonify({"status": "reset"})
 
-# 실행
+@app.route("/update_time", methods=["POST"])
+def update_time():
+    data = request.get_json()
+    time_str = data.get("time", "")
+    if not time_str:
+        return jsonify({"status": "error", "message": "No time provided"}), 400
+    print(f"[RECEIVED TIME] {time_str}")
+    try:
+        with open("recorded_times.txt", "a") as f:
+            f.write(time_str + "\n")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"[WRITE ERROR] {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
     threading.Thread(target=monitor_buttons, daemon=True).start()
