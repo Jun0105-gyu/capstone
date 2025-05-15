@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
-import 'package:drowsy_timer/stats/statistics_page.dart';
 
 void main() {
   runApp(DrowsinessApp());
@@ -27,13 +26,31 @@ class _StopwatchPageState extends State<StopwatchPage> {
   String _time = "00:00:00";
   Timer? _timer;
   bool _isRunning = false;
-  String flaskURL = "http://라즈베리파이IP:5000"; // 꼭 본인 IP로 바꾸세요
+  bool isDrowsy = false;
+
+  final String flaskURL = "http://192.168.137.69:5000"; // ← 본인의 Flask IP
+
+  @override
+  void initState() {
+    super.initState();
+    _resetServer(); // 앱 실행 시 서버 초기화
+  }
+
+  Future<void> _resetServer() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/reset'));
+      print("[APP] 서버 초기화 완료: ${res.statusCode}");
+    } catch (e) {
+      print("[APP] 서버 초기화 실패: $e");
+    }
+  }
 
   void _startTimer() async {
     await http.get(Uri.parse('$flaskURL/start'));
     _isRunning = true;
     _timer = Timer.periodic(Duration(seconds: 1), (timer) {
       _fetchTime();
+      _checkDrowsiness();
     });
   }
 
@@ -50,7 +67,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
     });
   }
 
-  void _fetchTime() async {
+  Future<void> _fetchTime() async {
     try {
       final res = await http.get(Uri.parse('$flaskURL/get_time'));
       if (res.statusCode == 200) {
@@ -60,23 +77,45 @@ class _StopwatchPageState extends State<StopwatchPage> {
         });
       }
     } catch (e) {
-      print("Error fetching time: $e");
+      print("시간 조회 실패: $e");
     }
   }
 
-  void _sendTimeToFlask(String time) async {
+  Future<void> _checkDrowsiness() async {
     try {
-      final res = await http.post(
-        Uri.parse('$flaskURL/update_time'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"time": time}),
-      );
-      if (res.statusCode != 200) {
-        print("Failed to send time: ${res.statusCode}");
+      final res = await http.get(Uri.parse('$flaskURL/detect_drowsiness'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data["drowsy"] == true && !isDrowsy) {
+          isDrowsy = true;
+          _stopTimer();
+          _showDrowsyDialog();
+        }
       }
     } catch (e) {
-      print("Failed to send time: $e");
+      print("졸음 체크 실패: $e");
     }
+  }
+
+  void _showDrowsyDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: Text("졸음 감지!"),
+        content: Text("졸음이 감지되었습니다."),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await _resetServer(); // 팝업 확인 시 서버 초기화
+              setState(() => isDrowsy = false);
+              Navigator.of(context).pop();
+            },
+            child: Text("확인"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -99,26 +138,10 @@ class _StopwatchPageState extends State<StopwatchPage> {
             children: [
               ElevatedButton(onPressed: _startTimer, child: Text("Start")),
               SizedBox(width: 10),
-              ElevatedButton(
-                onPressed: () {
-                  _stopTimer();
-                  _sendTimeToFlask(_time);
-                },
-                child: Text("Stop"),
-              ),
+              ElevatedButton(onPressed: _stopTimer, child: Text("Stop")),
               SizedBox(width: 10),
               ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
             ],
-          ),
-          SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => StatisticsPage()),
-              );
-            },
-            child: Text("통계 보기"),
           ),
         ],
       ),
