@@ -12,8 +12,7 @@ from mediapipe.python.solutions import face_mesh as mp_face_mesh
 app = Flask(__name__)
 
 # =====================
-# 상태 변수
-# =====================
+# ?곹깭 蹂??# =====================
 timer_running = False
 start_time = None
 elapsed_time = 0
@@ -21,23 +20,20 @@ elapsed_before_stop = 0
 drowsy_detected = False
 drowsiness_reason = ""
 
-# 졸음 조건 유지 시간 변수
-ear_condition_start = None
+# 議몄쓬 議곌굔 ?좎? ?쒓컙 蹂??ear_condition_start = None
 dy_condition_start = None
 hand_condition_start = None
 
-# DY 기준 초기값
-nose_base_y = None
+# DY 湲곗? 珥덇린媛?nose_base_y = None
 
 lock = threading.Lock()
 
-# MediaPipe 초기화
-pose = mp_pose.Pose()
+# MediaPipe 珥덇린??pose = mp_pose.Pose()
 hands = mp_hands.Hands()
 face_mesh = mp_face_mesh.FaceMesh()
 
 # =====================
-# 타이머 관련 함수
+# ??대㉧ 愿???⑥닔
 # =====================
 def timer_loop():
     global start_time, elapsed_time
@@ -79,7 +75,7 @@ def reset():
     with lock:
         timer_running = False
         start_time = None
-        elapsed_time = 0  # 초기화 가능 여부에 따라 조절
+        elapsed_time = 0  # 珥덇린??媛???щ????곕씪 議곗젅
         ear_condition_start = None
         dy_condition_start = None
         hand_condition_start = None
@@ -106,8 +102,7 @@ def detect_drowsiness():
     return jsonify({"drowsy": drowsy_detected, "reason": drowsiness_reason})
 
 # =====================
-# 졸음 감지 쓰레드
-# =====================
+# 議몄쓬 媛먯? ?곕젅??# =====================
 def drowsiness_detection_loop():
     global ear_condition_start, dy_condition_start, hand_condition_start
     global drowsy_detected, drowsiness_reason, nose_base_y
@@ -127,7 +122,7 @@ def drowsiness_detection_loop():
 
         current_time = time.time()
 
-        # EAR 계산
+        # EAR 怨꾩궛
         ear = 0
         if face_results.multi_face_landmarks:
             lm = face_results.multi_face_landmarks[0].landmark
@@ -140,11 +135,11 @@ def drowsiness_detection_loop():
         if ear < 0.2:
             if not ear_condition_start:
                 ear_condition_start = current_time
-            print(f"[EYE] EAR 조건 유지 시간: {current_time - ear_condition_start:.1f}초")
+            print(f"[EYE] EAR 議곌굔 ?좎? ?쒓컙: {current_time - ear_condition_start:.1f}珥?)
         else:
             ear_condition_start = None
 
-        # DY 계산
+        # DY 怨꾩궛
         dy = 0
         if pose_results.pose_landmarks:
             nose_y = pose_results.pose_landmarks.landmark[0].y
@@ -155,11 +150,11 @@ def drowsiness_detection_loop():
             if dy > 20:
                 if not dy_condition_start:
                     dy_condition_start = current_time
-                print(f"[HEAD] DY 조건 유지 시간: {current_time - dy_condition_start:.1f}초")
+                print(f"[HEAD] DY 議곌굔 ?좎? ?쒓컙: {current_time - dy_condition_start:.1f}珥?)
             else:
                 dy_condition_start = None
 
-        # 손 움직임
+        # ???吏곸엫
         movement = 0
         if hands_results.multi_hand_landmarks:
             lm = hands_results.multi_hand_landmarks[0].landmark[10]
@@ -175,11 +170,11 @@ def drowsiness_detection_loop():
         if movement < 50:
             if not hand_condition_start:
                 hand_condition_start = current_time
-            print(f"[HAND] Movement 조건 유지 시간: {current_time - hand_condition_start:.1f}초")
+            print(f"[HAND] Movement 議곌굔 ?좎? ?쒓컙: {current_time - hand_condition_start:.1f}珥?)
         else:
             hand_condition_start = None
 
-        # 졸음 판정
+        # 議몄쓬 ?먯젙
         if timer_running and not drowsy_detected:
             eye_drowsy = ear_condition_start and current_time - ear_condition_start >= 5
             head_drowsy = dy_condition_start and current_time - dy_condition_start >= 4
@@ -190,8 +185,7 @@ def drowsiness_detection_loop():
                 drowsiness_reason = "HAND + EYE" if eye_drowsy else "HAND + HEAD"
                 print(f"=== DROWSINESS DETECTED: {drowsiness_reason} ===")
 
-        # 미리보기 창
-        cv2.imshow("Drowsiness Detection", frame)
+        # 誘몃━蹂닿린 李?        cv2.imshow("Drowsiness Detection", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -199,7 +193,7 @@ def drowsiness_detection_loop():
     cv2.destroyAllWindows()
 
 # =====================
-# 메인 실행
+# 硫붿씤 ?ㅽ뻾
 # =====================
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
