@@ -7,14 +7,28 @@ from mediapipe.python.solutions import pose as mp_pose
 from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
 import RPi.GPIO as GPIO
-import board
-import busio
-import adafruit_character_lcd.character_lcd_i2c as character_lcd
+from lcd_i2c import LCD  # 사용자가 미리 설치한 LCD I2C 드라이버 모듈
+
+app = Flask(__name__)
 
 # =====================
-# Flask & Global States
+# GPIO 설정
 # =====================
-app = Flask(__name__)
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Start
+GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
+GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
+
+# =====================
+# LCD 설정
+# =====================
+lcd = LCD()  # 예: 16x2 LCD 사용
+lcd.clear()
+lcd.print_line("Time: 00:00:00", 0)
+
+# =====================
+# Global State
+# =====================
 timer_running = False
 start_time = None
 elapsed_time = 0
@@ -27,46 +41,23 @@ dy_condition_start = None
 hand_condition_start = None
 nose_base_y = None
 
-no_face_count = 0
-no_hand_count = 0
-no_nose_count = 0
-
 lock = threading.Lock()
+history_saved = False  # 통계 기록 여부
 
-# =====================
-# GPIO Setup
-# =====================
-GPIO.setmode(GPIO.BCM)
-START_PIN = 17
-STOP_PIN = 27
-RESET_PIN = 22
-GPIO.setup(START_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(STOP_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(RESET_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-# =====================
-# LCD Setup
-# =====================
-i2c = busio.I2C(board.SCL, board.SDA)
-lcd = character_lcd.Character_LCD_I2C(i2c, 16, 2)
-lcd.clear()
-
-# =====================
-# MediaPipe Init
-# =====================
+# MediaPipe 초기화
 pose = mp_pose.Pose()
 hands = mp_hands.Hands()
 face_mesh = mp_face_mesh.FaceMesh()
 
 # =====================
-# Timer Thread
+# Timer Functions
 # =====================
 def timer_loop():
     global start_time, elapsed_time
     while True:
         if timer_running and start_time:
             elapsed_time = time.time() - start_time + elapsed_before_stop
-        lcd.message = "Time: " + format_time(elapsed_time)
+        lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
         time.sleep(1)
 
 def format_time(seconds):
@@ -75,9 +66,6 @@ def format_time(seconds):
     s = int(seconds) % 60
     return f"{h:02}:{m:02}:{s:02}"
 
-# =====================
-# API Routes
-# =====================
 @app.route("/start")
 def start():
     global timer_running, start_time
@@ -100,9 +88,16 @@ def stop():
 
 @app.route("/reset")
 def reset():
-    global timer_running, start_time, elapsed_time, elapsed_before_stop
-    global ear_condition_start, dy_condition_start, hand_condition_start, drowsy_detected, drowsiness_reason
+    global timer_running, start_time, elapsed_time, drowsy_detected
+    global ear_condition_start, dy_condition_start, hand_condition_start
+    global drowsiness_reason, elapsed_before_stop, history_saved
+
     with lock:
+        # 시간 기록 저장
+        if elapsed_time > 0 and not history_saved:
+            save_study_time(elapsed_time)
+            history_saved = True
+
         timer_running = False
         start_time = None
         elapsed_time = 0
@@ -133,15 +128,42 @@ def detect_drowsiness():
     return jsonify({"drowsy": drowsy_detected, "reason": drowsiness_reason})
 
 # =====================
-# Drowsiness Detection Loop
+# GPIO Monitoring
+# =====================
+def monitor_buttons():
+    while True:
+        if GPIO.input(17) == GPIO.LOW:
+            start()
+            time.sleep(0.5)
+        if GPIO.input(27) == GPIO.LOW:
+            stop()
+            time.sleep(0.5)
+        if GPIO.input(22) == GPIO.LOW:
+            reset()
+            time.sleep(0.5)
+        time.sleep(0.1)
+
+# =====================
+# Study Time Save
+# =====================
+def save_study_time(seconds):
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d")
+    with open("study_log.txt", "a") as f:
+        f.write(f"{now},{int(seconds)}
+")
+    print(f"[SAVE] Study time {int(seconds)} seconds saved for {now}")
+
+# =====================
+# Drowsiness Detection Thread
 # =====================
 def drowsiness_detection_loop():
     global ear_condition_start, dy_condition_start, hand_condition_start
-    global drowsy_detected, drowsiness_reason, nose_base_y
-    global no_face_count, no_hand_count, no_nose_count
+    global drowsy_detected, drowsiness_reason, nose_base_y, history_saved
 
     cap = cv2.VideoCapture(0)
     hand_history = []
+    last_valid_time = time.time()
 
     while True:
         ret, frame = cap.read()
@@ -154,82 +176,79 @@ def drowsiness_detection_loop():
         face_results = face_mesh.process(rgb)
 
         current_time = time.time()
+        active_detected = False
 
-        # EAR Detection
+        # EAR 계산
         ear = 0
         if face_results.multi_face_landmarks:
-            no_face_count = 0
             lm = face_results.multi_face_landmarks[0].landmark
             top = np.array([lm[386].x, lm[386].y])
             bottom = np.array([lm[374].x, lm[374].y])
             ear = np.linalg.norm(top - bottom)
-        else:
-            no_face_count += 1
-
+            active_detected = True
         print(f"[EYE] EAR: {ear:.3f}")
+
         if ear < 0.015:
             if not ear_condition_start:
                 ear_condition_start = current_time
-            print(f"[EYE] EAR condition duration: {current_time - ear_condition_start:.1f} sec")
+            print(f"[EYE] EAR condition duration: {current_time - ear_condition_start:.1f}s")
         else:
             ear_condition_start = None
 
-        # DY Detection
+        # DY 계산
         dy = 0
         if pose_results.pose_landmarks:
-            no_nose_count = 0
             nose_y = pose_results.pose_landmarks.landmark[0].y
             if nose_base_y is None:
                 nose_base_y = nose_y
             dy = (nose_y - nose_base_y) * 1000
-        else:
-            no_nose_count += 1
+            print(f"[HEAD] DY: {dy:.2f}")
+            if dy > 150:
+                if not dy_condition_start:
+                    dy_condition_start = current_time
+                print(f"[HEAD] DY condition duration: {current_time - dy_condition_start:.1f}s")
+            else:
+                dy_condition_start = None
+            active_detected = True
 
-        print(f"[HEAD] DY: {dy:.2f}")
-        if dy > 150:
-            if not dy_condition_start:
-                dy_condition_start = current_time
-            print(f"[HEAD] DY condition duration: {current_time - dy_condition_start:.1f} sec")
-        else:
-            dy_condition_start = None
-
-        # Hand Detection
+        # 손 움직임
         movement = 0
         if hands_results.multi_hand_landmarks:
-            no_hand_count = 0
             lm = hands_results.multi_hand_landmarks[0].landmark[10]
             hand_history.append((lm.x, lm.y, current_time))
             hand_history = [h for h in hand_history if current_time - h[2] <= 5]
             if len(hand_history) >= 2:
                 movement = np.mean([
-                    np.linalg.norm(np.array(hand_history[i][:2]) - np.array(hand_history[i-1][:2]))
+                    np.linalg.norm(np.array(hand_history[i][:2]) - np.array(hand_history[i - 1][:2]))
                     for i in range(1, len(hand_history))
                 ]) * 1000
-        else:
-            no_hand_count += 1
-
+            active_detected = True
         print(f"[HAND] Movement: {movement:.2f}")
+
         if movement < 13:
             if not hand_condition_start:
                 hand_condition_start = current_time
-            print(f"[HAND] Movement condition duration: {current_time - hand_condition_start:.1f} sec")
+            print(f"[HAND] Movement condition duration: {current_time - hand_condition_start:.1f}s")
         else:
             hand_condition_start = None
 
-        # Final Drowsiness Check
+        # 졸음 감지
         if timer_running and not drowsy_detected:
             eye_drowsy = ear_condition_start and current_time - ear_condition_start >= 5
             head_drowsy = dy_condition_start and current_time - dy_condition_start >= 4
             hand_drowsy = hand_condition_start and current_time - hand_condition_start >= 5
+
             if hand_drowsy and (eye_drowsy or head_drowsy):
                 drowsy_detected = True
                 drowsiness_reason = "HAND + EYE" if eye_drowsy else "HAND + HEAD"
                 print(f"=== DROWSINESS DETECTED: {drowsiness_reason} ===")
 
-        # Auto stop if no detection
-        if (no_face_count >= 10 and no_hand_count >= 10 and no_nose_count >= 10):
-            print("[AUTO STOP] No detection for 10 seconds")
-            timer_running = False
+        # 10초 이상 비활성 시 자동 정지
+        if not active_detected and (current_time - last_valid_time > 10):
+            print("[AUTO STOP] No activity detected for 10 seconds. Stopping timer.")
+            stop()
+        elif active_detected:
+            last_valid_time = current_time
 
         cv2.imshow("Drowsiness Detection", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -237,21 +256,6 @@ def drowsiness_detection_loop():
 
     cap.release()
     cv2.destroyAllWindows()
-
-# =====================
-# GPIO Monitor Thread
-# =====================
-def monitor_buttons():
-    while True:
-        if not GPIO.input(START_PIN):
-            start()
-            time.sleep(0.5)
-        elif not GPIO.input(STOP_PIN):
-            stop()
-            time.sleep(0.5)
-        elif not GPIO.input(RESET_PIN):
-            reset()
-            time.sleep(0.5)
 
 # =====================
 # Main Execution
