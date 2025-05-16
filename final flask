@@ -7,12 +7,12 @@ from mediapipe.python.solutions import pose as mp_pose
 from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
 import RPi.GPIO as GPIO
-from lcd_i2c import LCD  # 사용자가 미리 설치한 LCD I2C 드라이버 모듈
+from lcd_i2c import LCD  # ?ъ슜?먭? 誘몃━ ?ㅼ튂??LCD I2C ?쒕씪?대쾭 紐⑤뱢
 
 app = Flask(__name__)
 
 # =====================
-# GPIO 설정
+# GPIO ?ㅼ젙
 # =====================
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Start
@@ -20,9 +20,9 @@ GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
 GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
 
 # =====================
-# LCD 설정
+# LCD ?ㅼ젙
 # =====================
-lcd = LCD()  # 예: 16x2 LCD 사용
+lcd = LCD()  # ?? 16x2 LCD ?ъ슜
 lcd.clear()
 lcd.print_line("Time: 00:00:00", 0)
 
@@ -42,10 +42,9 @@ hand_condition_start = None
 nose_base_y = None
 
 lock = threading.Lock()
-history_saved = False  # 통계 기록 여부
+history_saved = False  # ?듦퀎 湲곕줉 ?щ?
 
-# MediaPipe 초기화
-pose = mp_pose.Pose()
+# MediaPipe 珥덇린??pose = mp_pose.Pose()
 hands = mp_hands.Hands()
 face_mesh = mp_face_mesh.FaceMesh()
 
@@ -93,8 +92,7 @@ def reset():
     global drowsiness_reason, elapsed_before_stop, history_saved
 
     with lock:
-        # 시간 기록 저장
-        if elapsed_time > 0 and not history_saved:
+        # ?쒓컙 湲곕줉 ???        if elapsed_time > 0 and not history_saved:
             save_study_time(elapsed_time)
             history_saved = True
 
@@ -177,7 +175,7 @@ def drowsiness_detection_loop():
         current_time = time.time()
         active_detected = False
 
-        # EAR 계산
+        # EAR 怨꾩궛
         ear = 0
         if face_results.multi_face_landmarks:
             lm = face_results.multi_face_landmarks[0].landmark
@@ -194,7 +192,7 @@ def drowsiness_detection_loop():
         else:
             ear_condition_start = None
 
-        # DY 계산
+        # DY 怨꾩궛
         dy = 0
         if pose_results.pose_landmarks:
             nose_y = pose_results.pose_landmarks.landmark[0].y
@@ -210,7 +208,7 @@ def drowsiness_detection_loop():
                 dy_condition_start = None
             active_detected = True
 
-        # 손 움직임
+        # ???吏곸엫
         movement = 0
         if hands_results.multi_hand_landmarks:
             lm = hands_results.multi_hand_landmarks[0].landmark[10]
@@ -231,7 +229,7 @@ def drowsiness_detection_loop():
         else:
             hand_condition_start = None
 
-        # 졸음 감지
+        # 議몄쓬 媛먯?
         if timer_running and not drowsy_detected:
             eye_drowsy = ear_condition_start and current_time - ear_condition_start >= 5
             head_drowsy = dy_condition_start and current_time - dy_condition_start >= 4
@@ -242,7 +240,7 @@ def drowsiness_detection_loop():
                 drowsiness_reason = "HAND + EYE" if eye_drowsy else "HAND + HEAD"
                 print(f"=== DROWSINESS DETECTED: {drowsiness_reason} ===")
 
-        # 10초 이상 비활성 시 자동 정지
+        # 10珥??댁긽 鍮꾪솢?????먮룞 ?뺤?
         if not active_detected and (current_time - last_valid_time > 10):
             print("[AUTO STOP] No activity detected for 10 seconds. Stopping timer.")
             stop()
