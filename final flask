@@ -12,20 +12,18 @@ from smbus2 import SMBus
 
 app = Flask(__name__)
 
-# GPIO 버튼 설정
+# GPIO 설정
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Start
-GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
-GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
+GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-# LCD 초기화
+# LCD 설정
 lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1, cols=16, rows=2)
 lcd.clear()
 lcd.write_string("Time: 00:00:00")
 
-# =====================
-# Global State
-# =====================
+# 전역 변수
 timer_running = False
 start_time = None
 elapsed_time = 0
@@ -45,34 +43,36 @@ pose = mp_pose.Pose()
 hands = mp_hands.Hands()
 face_mesh = mp_face_mesh.FaceMesh()
 
+# 시간 포맷
 def format_time(seconds):
     h = int(seconds) // 3600
     m = (int(seconds) % 3600) // 60
     s = int(seconds) % 60
     return f"{h:02}:{m:02}:{s:02}"
 
-@app.route("/start")
-def start():
+# 시간 저장
+def save_study_time(seconds):
+    with open("study_log.txt", "a") as f:
+        f.write(f"{time.strftime('%Y-%m-%d')},{int(seconds)}\n")
+
+# 버튼 및 API 공용 함수
+def handle_start():
     global timer_running, start_time
     with lock:
         if not timer_running:
             start_time = time.time()
             timer_running = True
-            print("[API] Timer started")
-    return "Started"
+            print("[START] Timer started")
 
-@app.route("/stop")
-def stop():
+def handle_stop():
     global timer_running, elapsed_before_stop
     with lock:
         if timer_running:
             timer_running = False
             elapsed_before_stop = elapsed_time
-            print("[API] Timer stopped")
-    return "Stopped"
+            print("[STOP] Timer stopped")
 
-@app.route("/reset")
-def reset():
+def handle_reset():
     global timer_running, start_time, elapsed_time, drowsy_detected
     global ear_condition_start, dy_condition_start, hand_condition_start
     global drowsiness_reason, elapsed_before_stop, history_saved
@@ -80,7 +80,6 @@ def reset():
         if elapsed_time > 0 and not history_saved:
             save_study_time(elapsed_time)
             history_saved = True
-
         timer_running = False
         start_time = None
         elapsed_time = 0
@@ -91,6 +90,21 @@ def reset():
         drowsy_detected = False
         drowsiness_reason = ""
         print("[RESET] System reset")
+
+# Flask 라우트
+@app.route("/start")
+def start():
+    handle_start()
+    return "Started"
+
+@app.route("/stop")
+def stop():
+    handle_stop()
+    return "Stopped"
+
+@app.route("/reset")
+def reset():
+    handle_reset()
     return "Reset"
 
 @app.route("/get_time")
@@ -110,10 +124,7 @@ def update_time():
 def detect_drowsiness():
     return jsonify({"drowsy": drowsy_detected, "reason": drowsiness_reason})
 
-def save_study_time(seconds):
-    with open("study_log.txt", "a") as f:
-        f.write(f"{time.strftime('%Y-%m-%d')},{int(seconds)}\n")
-
+# 타이머 쓰레드
 def timer_loop():
     global start_time, elapsed_time
     while True:
@@ -123,6 +134,7 @@ def timer_loop():
             lcd.write_string(f"Time: {format_time(elapsed_time):<16}")
         time.sleep(1)
 
+# 졸음 감지 쓰레드
 def drowsiness_detection_loop():
     global ear_condition_start, dy_condition_start, hand_condition_start
     global drowsy_detected, drowsiness_reason, nose_base_y
@@ -215,17 +227,18 @@ def drowsiness_detection_loop():
         else:
             no_face_count = 0
 
+        # 물리 버튼 처리
         if GPIO.input(17) == GPIO.LOW:
             print("[BUTTON] Start pressed")
-            start()
+            handle_start()
 
         if GPIO.input(27) == GPIO.LOW:
             print("[BUTTON] Stop pressed")
-            stop()
+            handle_stop()
 
         if GPIO.input(22) == GPIO.LOW:
             print("[BUTTON] Reset pressed")
-            reset()
+            handle_reset()
 
         cv2.imshow("Drowsiness Detection", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -234,6 +247,7 @@ def drowsiness_detection_loop():
     cap.release()
     cv2.destroyAllWindows()
 
+# 메인 실행
 if __name__ == "__main__":
     threading.Thread(target=timer_loop, daemon=True).start()
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
