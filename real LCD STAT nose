@@ -147,7 +147,7 @@ def drowsiness_detection_loop():
                 nose_base_y = nose_y
             dy = (nose_y - nose_base_y) * 1000
             print(f"[HEAD] DY: {dy:.2f}")
-            if dy > 20:
+            if dy > 180:
                 if not dy_condition_start:
                     dy_condition_start = current_time
                 print(f"[HEAD] DY condition duration: {current_time - dy_condition_start:.1f} seconds")
@@ -159,7 +159,7 @@ def drowsiness_detection_loop():
         if hands_results.multi_hand_landmarks:
             lm = hands_results.multi_hand_landmarks[0].landmark[10]
             hand_history.append((lm.x, lm.y, current_time))
-            hand_history = [h for h in hand_history if current_time - h[2] <= 5]
+            hand_history = [h for h in hand_history if current_time - h[2] <= 10]
             if len(hand_history) >= 2:
                 movement = np.mean([
                     np.linalg.norm(np.array(hand_history[i][:2]) - np.array(hand_history[i-1][:2]))
@@ -167,7 +167,7 @@ def drowsiness_detection_loop():
                 ]) * 1000
         print(f"[HAND] Movement: {movement:.2f}")
 
-        if movement < 50:
+        if movement < 10:
             if not hand_condition_start:
                 hand_condition_start = current_time
             print(f"[HAND] Movement condition duration: {current_time - hand_condition_start:.1f} seconds")
