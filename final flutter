@@ -3,9 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:intl/intl.dart';
 import 'package:drowsy_timer/stats/statistics_page.dart';
-import 'package:drowsy_timer/stats/db_helper.dart';
 
 void main() {
   runApp(DrowsinessApp());
@@ -38,7 +36,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
   void initState() {
     super.initState();
     _audioPlayer = AudioPlayer();
-    _resetServer();
+    _resetServer(); // 앱 실행 시 서버 상태 초기화
     _startMonitoring();
   }
 
@@ -89,18 +87,17 @@ class _StopwatchPageState extends State<StopwatchPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Drowsiness Detected!"),
-        content: Text("Reason: $reason"),
+        title: Text("졸음 감지!"),
+        content: Text("이유: $reason"),
         actions: [
           TextButton(
             onPressed: () {
               _stopAlarm();
               _isDrowsy = false;
-              _stopTimer(); // Stop timer
-              _resetServer(); // Reset detection state
+              _stopTimer(); // 팝업 확인 시 타이머 정지
               Navigator.of(context).pop();
             },
-            child: Text("Confirm"),
+            child: Text("확인"),
           ),
         ],
       ),
@@ -126,21 +123,13 @@ class _StopwatchPageState extends State<StopwatchPage> {
   }
 
   void _resetTimer() async {
-    _sendTimeToDB();
+    await http.get(Uri.parse('$flaskURL/update_statistics'));
     await http.get(Uri.parse('$flaskURL/reset'));
     setState(() {
       _time = "00:00:00";
       _isRunning = false;
     });
     _timer?.cancel();
-  }
-
-  void _sendTimeToDB() async {
-    await DBHelper.insertRecord({
-      "date": DateFormat('yyyy-MM-dd').format(DateTime.now()),
-      "time": _time,
-      "drowsy": 0
-    });
   }
 
   void _resetServer() async {
@@ -193,7 +182,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
                 MaterialPageRoute(builder: (_) => StatisticsPage()),
               );
             },
-            child: Text("View Statistics"),
+            child: Text("통계 보기"),
           ),
         ],
       ),
