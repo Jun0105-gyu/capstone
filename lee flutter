@@ -1,0 +1,205 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:async';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:drowsy_timer/stats/statistics_page.dart';
+
+void main() {
+  runApp(DrowsinessApp());
+}
+
+class DrowsinessApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Drowsiness Timer',
+      home: StopwatchPage(),
+    );
+  }
+}
+
+class StopwatchPage extends StatefulWidget {
+  @override
+  _StopwatchPageState createState() => _StopwatchPageState();
+}
+
+class _StopwatchPageState extends State<StopwatchPage> {
+  String flaskURL = "http://192.168.137.69:5000"; // 본인 IP로 수정
+  String _time = "00:00:00";
+  Timer? _timer;
+  bool _isRunning = false;
+  bool _isDrowsy = false;
+  late AudioPlayer _audioPlayer;
+
+  @override
+  void initState() {
+    super.initState();
+    _audioPlayer = AudioPlayer();
+    _resetServer(); // 앱 실행 시 서버 상태 초기화
+    _startMonitoring();
+  }
+
+  void _startMonitoring() {
+    Timer.periodic(Duration(seconds: 1), (timer) async {
+      await _syncWithServer();
+      if (_isRunning) _fetchTime();
+      _checkDrowsiness();
+    });
+  }
+
+  Future<void> _syncWithServer() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/status'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          _isRunning = data['running'];
+          _time = data['time'];
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchTime() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/get_time'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          _time = data['time'];
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkDrowsiness() async {
+    try {
+      final res = await http.get(Uri.parse('$flaskURL/detect_drowsiness'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data["drowsy"] == true && !_isDrowsy) {
+          _isDrowsy = true;
+          _stopTimer();
+          _playAlarm();
+          _showDrowsinessPopup(data["reason"]);
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _playAlarm() async {
+    await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+    await _audioPlayer.play(AssetSource('sound/alert.mp3'));
+  }
+
+  void _stopAlarm() async {
+    await _audioPlayer.stop();
+  }
+
+  void _showDrowsinessPopup(String reason) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("졸음 감지!"),
+        content: Text("이유: $reason"),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              _stopAlarm();
+              _isDrowsy = false;
+              await http.get(Uri.parse('$flaskURL/clear_drowsiness'));
+              Navigator.of(context).pop();
+            },
+            child: Text("확인"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _startTimer() async {
+    if (_isRunning) return;
+    await http.get(Uri.parse('$flaskURL/start'));
+    setState(() {
+      _isRunning = true;
+    });
+    _timer = Timer.periodic(Duration(seconds: 1), (_) => _fetchTime());
+  }
+
+  void _stopTimer() async {
+    await http.get(Uri.parse('$flaskURL/stop'));
+    _sendTimeToFlask(_time);
+    setState(() {
+      _isRunning = false;
+    });
+    _timer?.cancel();
+  }
+
+  void _resetTimer() async {
+    await http.get(Uri.parse('$flaskURL/update_statistics'));
+    await http.get(Uri.parse('$flaskURL/reset'));
+    setState(() {
+      _time = "00:00:00";
+      _isRunning = false;
+    });
+    _timer?.cancel();
+  }
+
+  void _resetServer() async {
+    try {
+      await http.get(Uri.parse('$flaskURL/reset'));
+    } catch (_) {}
+  }
+
+  void _sendTimeToFlask(String time) async {
+    try {
+      await http.post(
+        Uri.parse('$flaskURL/update_time'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"time": time}),
+      );
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _stopAlarm();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text("Drowsiness Timer")),
+      body: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(_time, style: TextStyle(fontSize: 48)),
+          SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(onPressed: _startTimer, child: Text("Start")),
+              SizedBox(width: 10),
+              ElevatedButton(onPressed: _stopTimer, child: Text("Stop")),
+              SizedBox(width: 10),
+              ElevatedButton(onPressed: _resetTimer, child: Text("Reset")),
+            ],
+          ),
+          SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => StatisticsPage()),
+              );
+            },
+            child: Text("통계 보기"),
+          ),
+        ],
+      ),
+    );
+  }
+}
