@@ -7,10 +7,11 @@ import threading
 from smbus2 import SMBus
 from RPLCD.i2c import CharLCD
 import RPi.GPIO as GPIO
+import json
 
 app = Flask(__name__)
 
-# LCD 설정
+# LCD 초기화
 lcd = None
 try:
     lcd = CharLCD('PCF8574', 0x27, auto_linebreaks=True)
@@ -57,8 +58,7 @@ def monitor_buttons():
         if GPIO.input(17) == GPIO.HIGH:
             print("[BUTTON] START")
             timer_running = True
-            if stopwatch_start_time is None:
-                stopwatch_start_time = time.time() - elapsed_before_stop
+            stopwatch_start_time = time.time() - elapsed_before_stop
             time.sleep(0.3)
         elif GPIO.input(27) == GPIO.HIGH:
             print("[BUTTON] STOP")
@@ -75,7 +75,7 @@ def monitor_buttons():
             time.sleep(0.3)
         time.sleep(0.05)
 
-# 졸음 감지 관련 변수
+# 졸음 감지 변수
 drowsy = False
 reason = ""
 already_alerted = False
@@ -89,7 +89,7 @@ nose_y_history = []
 hand_10_history = []
 stop_flag = False
 
-# MediaPipe 설정
+# MediaPipe 초기화
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
@@ -138,32 +138,33 @@ def drowsiness_detection_loop():
                 right_ear = calculate_ear(landmarks, RIGHT_EYE)
                 ear = (left_ear + right_ear) / 2.0
                 print(f"[EYE] EAR: {ear:.3f}")
-
                 if ear < 0.23:
                     if eye_start_time is None:
                         eye_start_time = current_time
-                    elif current_time - eye_start_time >= 5:
-                        eye_condition = True
+                    elif current_time - eye_start_time >= 0:
                         print(f"[EYE] EAR 조건 유지 시간: {current_time - eye_start_time:.1f}초")
+                        if current_time - eye_start_time >= 5:
+                            eye_condition = True
                 else:
                     eye_start_time = None
                     eye_condition = False
 
                 nose_y = landmarks[1][1]
                 nose_y_history.append(nose_y)
-                if len(nose_y_history) > 180:
+                if len(nose_y_history) > 150:
                     nose_y_history.pop(0)
 
-                if len(nose_y_history) >= 150:
+                if len(nose_y_history) >= 60:
                     baseline_y = sum(nose_y_history[:30]) / 30
                     dy = nose_y - baseline_y
                     print(f"[HEAD] DY: {dy:.2f}")
                     if dy > 20:
                         if head_start_time is None:
                             head_start_time = current_time
-                        elif current_time - head_start_time >= 4:
-                            head_condition = True
+                        elif current_time - head_start_time >= 0:
                             print(f"[HEAD] DY 조건 유지 시간: {current_time - head_start_time:.1f}초")
+                            if current_time - head_start_time >= 4:
+                                head_condition = True
                     else:
                         head_start_time = None
                         head_condition = False
@@ -187,17 +188,17 @@ def drowsiness_detection_loop():
                 hand_start_time = None
                 hand_condition = False
 
-        if timer_running and not already_alerted:
+        if not already_alerted and timer_running:
             if hand_condition and head_condition:
                 drowsy = True
                 reason = "HAND + HEAD"
                 already_alerted = True
-                print("=== DROWSINESS DETECTED: HAND + HEAD ===")
+                print(f"=== DROWSINESS DETECTED: {reason} ===")
             elif hand_condition and eye_condition:
                 drowsy = True
                 reason = "HAND + EYE"
                 already_alerted = True
-                print("=== DROWSINESS DETECTED: HAND + EYE ===")
+                print(f"=== DROWSINESS DETECTED: {reason} ===")
             else:
                 drowsy = False
 
@@ -209,21 +210,20 @@ def drowsiness_detection_loop():
     cap.release()
     cv2.destroyAllWindows()
 
-# API 엔드포인트
-@app.route("/get_time")
+@app.route("/get_time", methods=["GET"])
 def get_time():
     return jsonify({"time": current_time_str})
 
-@app.route("/start")
+@app.route("/start", methods=["GET"])
 def start_timer():
     global timer_running, stopwatch_start_time, elapsed_before_stop
-    timer_running = True
-    if stopwatch_start_time is None:
+    if not timer_running:
+        timer_running = True
         stopwatch_start_time = time.time() - elapsed_before_stop
     print("[API] Timer started")
     return jsonify({"status": "started"})
 
-@app.route("/stop")
+@app.route("/stop", methods=["GET"])
 def stop_timer():
     global timer_running, elapsed_before_stop
     if stopwatch_start_time is not None:
@@ -232,17 +232,21 @@ def stop_timer():
     print("[API] Timer stopped")
     return jsonify({"status": "stopped"})
 
-@app.route("/reset")
+@app.route("/detect_drowsiness", methods=["GET"])
+def detect_drowsiness():
+    return jsonify({"drowsy": drowsy, "reason": reason})
+
+@app.route("/reset", methods=["GET"])
 def reset_status():
-    global drowsy, reason, already_alerted
+    global drowsy, already_alerted, reason
     global eye_start_time, hand_start_time, head_start_time
     global eye_condition, hand_condition, head_condition
     global nose_y_history, hand_10_history
     global timer_running, stopwatch_start_time, elapsed_before_stop
 
     drowsy = False
-    reason = ""
     already_alerted = False
+    reason = ""
     eye_start_time = None
     hand_start_time = None
     head_start_time = None
@@ -257,10 +261,6 @@ def reset_status():
     update_lcd_time("00:00:00")
     print("[RESET] System reset")
     return jsonify({"status": "reset"})
-
-@app.route("/detect_drowsiness")
-def detect_drowsiness():
-    return jsonify({"drowsy": drowsy, "reason": reason})
 
 @app.route("/update_time", methods=["POST"])
 def update_time():
