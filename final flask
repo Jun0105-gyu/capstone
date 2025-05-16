@@ -7,7 +7,8 @@ from flask import Flask, jsonify, request
 from mediapipe.python.solutions import pose as mp_pose
 from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
-from lcd_i2c import LCD
+from RPLCD.i2c import CharLCD
+from smbus2 import SMBus
 
 app = Flask(__name__)
 
@@ -18,9 +19,9 @@ GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
 GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
 
 # LCD 초기화
-lcd = LCD()  # 16x2 LCD 객체
+lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1, cols=16, rows=2)
 lcd.clear()
-lcd.print_line("Time: 00:00:00", 0)
+lcd.write_string("Time: 00:00:00")
 
 # =====================
 # Global State
@@ -118,7 +119,8 @@ def timer_loop():
     while True:
         if timer_running and start_time:
             elapsed_time = time.time() - start_time + elapsed_before_stop
-            lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
+            lcd.cursor_pos = (0, 0)
+            lcd.write_string(f"Time: {format_time(elapsed_time):<16}")
         time.sleep(1)
 
 def drowsiness_detection_loop():
@@ -143,7 +145,6 @@ def drowsiness_detection_loop():
 
         current_time = time.time()
 
-        # EAR
         ear = 0
         if face_results.multi_face_landmarks:
             no_face_count = 0
@@ -162,7 +163,6 @@ def drowsiness_detection_loop():
         else:
             ear_condition_start = None
 
-        # DY
         dy = 0
         if pose_results.pose_landmarks:
             nose_y = pose_results.pose_landmarks.landmark[0].y
@@ -177,7 +177,6 @@ def drowsiness_detection_loop():
             else:
                 dy_condition_start = None
 
-        # Hand
         movement = 0
         if hands_results.multi_hand_landmarks:
             lm = hands_results.multi_hand_landmarks[0].landmark[10]
@@ -197,7 +196,6 @@ def drowsiness_detection_loop():
         else:
             hand_condition_start = None
 
-        # Drowsiness
         if timer_running and not drowsy_detected:
             eye_drowsy = ear_condition_start and current_time - ear_condition_start >= 5
             head_drowsy = dy_condition_start and current_time - dy_condition_start >= 4
@@ -208,7 +206,6 @@ def drowsiness_detection_loop():
                 drowsiness_reason = "HAND + EYE" if eye_drowsy else "HAND + HEAD"
                 print(f"=== DROWSINESS DETECTED: {drowsiness_reason} ===")
 
-        # Auto Stop: no detection
         if timer_running and not face_results.multi_face_landmarks and not hands_results.multi_hand_landmarks and not pose_results.pose_landmarks:
             no_face_count += 1
             if no_face_count >= 10:
@@ -218,7 +215,6 @@ def drowsiness_detection_loop():
         else:
             no_face_count = 0
 
-        # Buttons
         if GPIO.input(17) == GPIO.LOW:
             print("[BUTTON] Start pressed")
             start()
