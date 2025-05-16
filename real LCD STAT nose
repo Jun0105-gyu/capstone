@@ -1,5 +1,3 @@
-# flask_app.py
-
 import cv2
 import time
 import threading
@@ -12,7 +10,8 @@ from mediapipe.python.solutions import face_mesh as mp_face_mesh
 app = Flask(__name__)
 
 # =====================
-# ?곹깭 蹂??# =====================
+# Global State
+# =====================
 timer_running = False
 start_time = None
 elapsed_time = 0
@@ -20,20 +19,20 @@ elapsed_before_stop = 0
 drowsy_detected = False
 drowsiness_reason = ""
 
-# 議몄쓬 議곌굔 ?좎? ?쒓컙 蹂??ear_condition_start = None
+ear_condition_start = None
 dy_condition_start = None
 hand_condition_start = None
-
-# DY 湲곗? 珥덇린媛?nose_base_y = None
+nose_base_y = None
 
 lock = threading.Lock()
 
-# MediaPipe 珥덇린??pose = mp_pose.Pose()
+# MediaPipe initialization
+pose = mp_pose.Pose()
 hands = mp_hands.Hands()
 face_mesh = mp_face_mesh.FaceMesh()
 
 # =====================
-# ??대㉧ 愿???⑥닔
+# Timer Functions
 # =====================
 def timer_loop():
     global start_time, elapsed_time
@@ -75,7 +74,7 @@ def reset():
     with lock:
         timer_running = False
         start_time = None
-        elapsed_time = 0  # 珥덇린??媛???щ????곕씪 議곗젅
+        elapsed_time = 0
         ear_condition_start = None
         dy_condition_start = None
         hand_condition_start = None
@@ -102,7 +101,8 @@ def detect_drowsiness():
     return jsonify({"drowsy": drowsy_detected, "reason": drowsiness_reason})
 
 # =====================
-# 議몄쓬 媛먯? ?곕젅??# =====================
+# Drowsiness Detection Thread
+# =====================
 def drowsiness_detection_loop():
     global ear_condition_start, dy_condition_start, hand_condition_start
     global drowsy_detected, drowsiness_reason, nose_base_y
@@ -122,7 +122,7 @@ def drowsiness_detection_loop():
 
         current_time = time.time()
 
-        # EAR 怨꾩궛
+        # EAR calculation
         ear = 0
         if face_results.multi_face_landmarks:
             lm = face_results.multi_face_landmarks[0].landmark
@@ -135,11 +135,11 @@ def drowsiness_detection_loop():
         if ear < 0.2:
             if not ear_condition_start:
                 ear_condition_start = current_time
-            print(f"[EYE] EAR 議곌굔 ?좎? ?쒓컙: {current_time - ear_condition_start:.1f}珥?)
+            print(f"[EYE] EAR condition duration: {current_time - ear_condition_start:.1f} seconds")
         else:
             ear_condition_start = None
 
-        # DY 怨꾩궛
+        # DY calculation
         dy = 0
         if pose_results.pose_landmarks:
             nose_y = pose_results.pose_landmarks.landmark[0].y
@@ -150,11 +150,11 @@ def drowsiness_detection_loop():
             if dy > 20:
                 if not dy_condition_start:
                     dy_condition_start = current_time
-                print(f"[HEAD] DY 議곌굔 ?좎? ?쒓컙: {current_time - dy_condition_start:.1f}珥?)
+                print(f"[HEAD] DY condition duration: {current_time - dy_condition_start:.1f} seconds")
             else:
                 dy_condition_start = None
 
-        # ???吏곸엫
+        # Hand movement
         movement = 0
         if hands_results.multi_hand_landmarks:
             lm = hands_results.multi_hand_landmarks[0].landmark[10]
@@ -170,11 +170,11 @@ def drowsiness_detection_loop():
         if movement < 50:
             if not hand_condition_start:
                 hand_condition_start = current_time
-            print(f"[HAND] Movement 議곌굔 ?좎? ?쒓컙: {current_time - hand_condition_start:.1f}珥?)
+            print(f"[HAND] Movement condition duration: {current_time - hand_condition_start:.1f} seconds")
         else:
             hand_condition_start = None
 
-        # 議몄쓬 ?먯젙
+        # Drowsiness detection
         if timer_running and not drowsy_detected:
             eye_drowsy = ear_condition_start and current_time - ear_condition_start >= 5
             head_drowsy = dy_condition_start and current_time - dy_condition_start >= 4
@@ -185,7 +185,7 @@ def drowsiness_detection_loop():
                 drowsiness_reason = "HAND + EYE" if eye_drowsy else "HAND + HEAD"
                 print(f"=== DROWSINESS DETECTED: {drowsiness_reason} ===")
 
-        # 誘몃━蹂닿린 李?        cv2.imshow("Drowsiness Detection", frame)
+        cv2.imshow("Drowsiness Detection", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -193,7 +193,7 @@ def drowsiness_detection_loop():
     cv2.destroyAllWindows()
 
 # =====================
-# 硫붿씤 ?ㅽ뻾
+# Main Execution
 # =====================
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
