@@ -202,3 +202,7 @@ def drowsiness_detection_loop():
 @app.route("/detect_drowsiness")
 def detect_drowsiness():
     return jsonify({"drowsy": drowsy_detected, "reason": drowsiness_reason})
+if __name__ == "__main__":
+    threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
+    threading.Thread(target=timer_loop, daemon=True).start()
+    app.run(host="0.0.0.0", port=5000)
