@@ -131,7 +131,7 @@ def drowsiness_detection_loop():
             ear = np.linalg.norm(top - bottom)  # pure vertical distance
         print(f"[EYE] EAR (top-bottom distance): {ear:.3f}")
 
-        if ear < 0.013:  # threshold tuned for vertical only
+        if ear < 0.015:  # threshold tuned for vertical only
             if not ear_condition_start:
                 ear_condition_start = current_time
             print(f"[EYE] EAR condition duration: {current_time - ear_condition_start:.1f} seconds")
@@ -166,7 +166,7 @@ def drowsiness_detection_loop():
                 ]) * 1000
         print(f"[HAND] Movement: {movement:.2f}")
 
-        if movement < 10:
+        if movement < 13:
             if not hand_condition_start:
                 hand_condition_start = current_time
             print(f"[HAND] Movement condition duration: {current_time - hand_condition_start:.1f} seconds")
