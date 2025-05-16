@@ -150,8 +150,7 @@ def save_study_time(seconds):
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d")
     with open("study_log.txt", "a") as f:
-        f.write(f"{now},{int(seconds)}
-")
+        f.write(f"{now},{int(seconds)}\n")
     print(f"[SAVE] Study time {int(seconds)} seconds saved for {now}")
 
 # =====================
