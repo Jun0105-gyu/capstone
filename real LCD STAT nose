@@ -10,7 +10,7 @@ import RPi.GPIO as GPIO
 
 app = Flask(__name__)
 
-# LCD 초기화
+# LCD 설정
 lcd = None
 try:
     lcd = CharLCD('PCF8574', 0x27, auto_linebreaks=True)
@@ -20,11 +20,11 @@ except Exception as e:
     print(f"[LCD INIT ERROR] {e}")
     lcd = None
 
-# 타이머 변수
+# 타이머 관련 변수
 timer_running = False
 stopwatch_start_time = None
-elapsed_before_stop = 0
 current_time_str = "00:00:00"
+elapsed_before_stop = 0
 
 def update_lcd_time(time_str):
     global current_time_str
@@ -57,7 +57,8 @@ def monitor_buttons():
         if GPIO.input(17) == GPIO.HIGH:
             print("[BUTTON] START")
             timer_running = True
-            stopwatch_start_time = time.time() - elapsed_before_stop
+            if stopwatch_start_time is None:
+                stopwatch_start_time = time.time() - elapsed_before_stop
             time.sleep(0.3)
         elif GPIO.input(27) == GPIO.HIGH:
             print("[BUTTON] STOP")
@@ -74,23 +75,25 @@ def monitor_buttons():
             time.sleep(0.3)
         time.sleep(0.05)
 
-# 졸음 감지 변수 (카운터 기반)
+# 졸음 감지 관련 변수
 drowsy = False
 reason = ""
 already_alerted = False
+eye_start_time = None
+hand_start_time = None
+head_start_time = None
+eye_condition = False
+hand_condition = False
+head_condition = False
+nose_y_history = []
+hand_10_history = []
 stop_flag = False
 
-hand_counter = 0
-eye_counter = 0
-head_counter = 0
-
+# MediaPipe 설정
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
 hands = mp_hands.Hands()
-
-nose_y_history = []
-hand_10_history = []
 
 def calculate_ear(landmarks, eye_indices):
     p = np.array([landmarks[i] for i in eye_indices])
@@ -107,7 +110,9 @@ def calculate_hand_movement(history):
 
 def drowsiness_detection_loop():
     global drowsy, reason, already_alerted
-    global hand_counter, eye_counter, head_counter
+    global eye_start_time, hand_start_time, head_start_time
+    global eye_condition, hand_condition, head_condition
+    global nose_y_history, hand_10_history, stop_flag
 
     cap = cv2.VideoCapture(0)
     while not stop_flag:
@@ -119,36 +124,50 @@ def drowsiness_detection_loop():
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         face_results = face_mesh.process(rgb)
         hand_results = hands.process(rgb)
+        current_time = time.time()
         h, w, _ = frame.shape
+        reason = ""
 
-        # EYE
         if face_results.multi_face_landmarks:
             for face_landmarks in face_results.multi_face_landmarks:
                 landmarks = [(int(lm.x * w), int(lm.y * h)) for lm in face_landmarks.landmark]
+
                 LEFT_EYE = [33, 160, 158, 133, 153, 144]
                 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
-                ear = (calculate_ear(landmarks, LEFT_EYE) + calculate_ear(landmarks, RIGHT_EYE)) / 2.0
+                left_ear = calculate_ear(landmarks, LEFT_EYE)
+                right_ear = calculate_ear(landmarks, RIGHT_EYE)
+                ear = (left_ear + right_ear) / 2.0
                 print(f"[EYE] EAR: {ear:.3f}")
-                if ear < 0.23:
-                    eye_counter += 1
-                else:
-                    eye_counter = max(0, eye_counter - 1)
 
-                # HEAD
+                if ear < 0.23:
+                    if eye_start_time is None:
+                        eye_start_time = current_time
+                    elif current_time - eye_start_time >= 5:
+                        eye_condition = True
+                        print(f"[EYE] EAR 조건 유지 시간: {current_time - eye_start_time:.1f}초")
+                else:
+                    eye_start_time = None
+                    eye_condition = False
+
                 nose_y = landmarks[1][1]
                 nose_y_history.append(nose_y)
                 if len(nose_y_history) > 180:
                     nose_y_history.pop(0)
-                if len(nose_y_history) >= 30:
+
+                if len(nose_y_history) >= 150:
                     baseline_y = sum(nose_y_history[:30]) / 30
                     dy = nose_y - baseline_y
                     print(f"[HEAD] DY: {dy:.2f}")
                     if dy > 20:
-                        head_counter += 1
+                        if head_start_time is None:
+                            head_start_time = current_time
+                        elif current_time - head_start_time >= 4:
+                            head_condition = True
+                            print(f"[HEAD] DY 조건 유지 시간: {current_time - head_start_time:.1f}초")
                     else:
-                        head_counter = max(0, head_counter - 1)
+                        head_start_time = None
+                        head_condition = False
 
-        # HAND
         if hand_results.multi_hand_landmarks:
             for hand_landmarks in hand_results.multi_hand_landmarks:
                 x = int(hand_landmarks.landmark[10].x * w)
@@ -156,47 +175,55 @@ def drowsiness_detection_loop():
                 hand_10_history.append((x, y))
                 if len(hand_10_history) > 150:
                     hand_10_history.pop(0)
+
             movement = calculate_hand_movement(hand_10_history)
             print(f"[HAND] Movement: {movement:.2f}")
             if movement < 50:
-                hand_counter += 1
+                if hand_start_time is None:
+                    hand_start_time = current_time
+                elif current_time - hand_start_time >= 5:
+                    hand_condition = True
             else:
-                hand_counter = max(0, hand_counter - 1)
+                hand_start_time = None
+                hand_condition = False
 
-        # DROWSINESS CHECK
-        if not already_alerted:
-            if hand_counter >= 12 and head_counter >= 12:
+        if timer_running and not already_alerted:
+            if hand_condition and head_condition:
                 drowsy = True
                 reason = "HAND + HEAD"
                 already_alerted = True
                 print("=== DROWSINESS DETECTED: HAND + HEAD ===")
-            elif hand_counter >= 12 and eye_counter >= 12:
+            elif hand_condition and eye_condition:
                 drowsy = True
                 reason = "HAND + EYE"
                 already_alerted = True
                 print("=== DROWSINESS DETECTED: HAND + EYE ===")
+            else:
+                drowsy = False
 
-        cv2.imshow("Camera", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        cv2.imshow("Camera Preview", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            stop_flag = True
             break
 
     cap.release()
     cv2.destroyAllWindows()
 
-@app.route("/get_time", methods=["GET"])
+# API 엔드포인트
+@app.route("/get_time")
 def get_time():
     return jsonify({"time": current_time_str})
 
-@app.route("/start", methods=["GET"])
+@app.route("/start")
 def start_timer():
     global timer_running, stopwatch_start_time, elapsed_before_stop
-    if not timer_running:
+    timer_running = True
+    if stopwatch_start_time is None:
         stopwatch_start_time = time.time() - elapsed_before_stop
-        timer_running = True
-        print("[API] Timer started")
+    print("[API] Timer started")
     return jsonify({"status": "started"})
 
-@app.route("/stop", methods=["GET"])
+@app.route("/stop")
 def stop_timer():
     global timer_running, elapsed_before_stop
     if stopwatch_start_time is not None:
@@ -205,17 +232,25 @@ def stop_timer():
     print("[API] Timer stopped")
     return jsonify({"status": "stopped"})
 
-@app.route("/reset", methods=["GET"])
-def reset_all():
-    global drowsy, already_alerted, reason
-    global hand_counter, eye_counter, head_counter
+@app.route("/reset")
+def reset_status():
+    global drowsy, reason, already_alerted
+    global eye_start_time, hand_start_time, head_start_time
+    global eye_condition, hand_condition, head_condition
+    global nose_y_history, hand_10_history
     global timer_running, stopwatch_start_time, elapsed_before_stop
+
     drowsy = False
-    already_alerted = False
     reason = ""
-    hand_counter = 0
-    eye_counter = 0
-    head_counter = 0
+    already_alerted = False
+    eye_start_time = None
+    hand_start_time = None
+    head_start_time = None
+    eye_condition = False
+    hand_condition = False
+    head_condition = False
+    nose_y_history.clear()
+    hand_10_history.clear()
     timer_running = False
     stopwatch_start_time = None
     elapsed_before_stop = 0
@@ -223,9 +258,25 @@ def reset_all():
     print("[RESET] System reset")
     return jsonify({"status": "reset"})
 
-@app.route("/detect_drowsiness", methods=["GET"])
+@app.route("/detect_drowsiness")
 def detect_drowsiness():
     return jsonify({"drowsy": drowsy, "reason": reason})
+
+@app.route("/update_time", methods=["POST"])
+def update_time():
+    data = request.get_json()
+    time_str = data.get("time", "")
+    if not time_str:
+        return jsonify({"status": "error", "message": "No time provided"}), 400
+
+    print(f"[RECEIVED TIME] {time_str}")
+    try:
+        with open("recorded_times.txt", "a") as f:
+            f.write(time_str + "\n")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"[WRITE ERROR] {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
