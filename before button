@@ -6,6 +6,10 @@ from flask import Flask, jsonify, request
 from mediapipe.python.solutions import pose as mp_pose
 from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
+from lcd_i2c import LCD
+lcd = LCD()
+lcd.clear()
+lcd.print_line("Time: 00:00:00", 0)
 
 app = Flask(__name__)
 
@@ -39,6 +43,7 @@ def timer_loop():
     while True:
         if timer_running and start_time:
             elapsed_time = time.time() - start_time + elapsed_before_stop
+        lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
         time.sleep(1)
 
 def format_time(seconds):
