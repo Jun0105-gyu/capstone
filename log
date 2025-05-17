@@ -1,6 +1,40 @@
-import RPi.GPIO as GPIO  
+def button_monitor_loop():
+    global timer_running, start_time, elapsed_time, elapsed_before_stop
+    global ear_condition_start, dy_condition_start, hand_condition_start
+    global drowsy_detected, drowsiness_reason
 
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Start
-GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
-GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
+    while True:
+        if GPIO.input(17) == GPIO.LOW:  # Start 버튼
+            if not timer_running:
+                with lock:
+                    start_time = time.time()
+                    timer_running = True
+                    ear_condition_start = None
+                    dy_condition_start = None
+                    hand_condition_start = None
+                    print("[GPIO] Start button pressed")
+
+        if GPIO.input(27) == GPIO.LOW:  # Stop 버튼
+            if timer_running:
+                with lock:
+                    timer_running = False
+                    elapsed_before_stop = elapsed_time
+                    lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
+                    start_time = None
+                    print("[GPIO] Stop button pressed")
+
+        if GPIO.input(22) == GPIO.LOW:  # Reset 버튼
+            with lock:
+                timer_running = False
+                start_time = None
+                elapsed_time = 0
+                elapsed_before_stop = 0
+                ear_condition_start = None
+                dy_condition_start = None
+                hand_condition_start = None
+                drowsy_detected = False
+                drowsiness_reason = ""
+                lcd.print_line("Time: 00:00:00", 0)
+                print("[GPIO] Reset button pressed")
+
+        time.sleep(0.2)
