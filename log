@@ -1,13 +1,12 @@
-@app.route("/")
-def index():
-    return '''
-    <html>
-        <head>
-            <title>카메라 미리보기</title>
-        </head>
-        <body>
-            <h1>Live Camera Feed</h1>
-            <img src="/video_feed" width="640" height="480">
-        </body>
-    </html>
-    '''
+from flask import Response
+
+def generate_video():
+    cap = cv2.VideoCapture(0)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
