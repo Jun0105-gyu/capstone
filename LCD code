@@ -1,28 +1,13 @@
-def gpio_button_monitor():
-    prev_state = [1, 1, 1]  # 버튼 초기 상태(풀업이니까 1)
-    while True:
-        # 각 버튼 현재값 읽기
-        btn1 = GPIO.input(17)
-        btn2 = GPIO.input(27)
-        btn3 = GPIO.input(22)
-
-        # falling edge (1->0)에서 동작
-        if prev_state[0] == 1 and btn1 == 0:
-            print("[GPIO] Start 버튼 눌림")
-            start()
-        if prev_state[1] == 1 and btn2 == 0:
-            print("[GPIO] Stop 버튼 눌림")
-            stop()
-        if prev_state[2] == 1 and btn3 == 0:
-            print("[GPIO] Reset 버튼 눌림")
-            reset()
-
-        prev_state = [btn1, btn2, btn3]
-        time.sleep(0.05)  # 50ms 폴링 (채터링 방지 겸)
-
-# 프로그램 시작 부분에 스레드로 실행
-if __name__ == "__main__":
-    threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
-    threading.Thread(target=timer_loop, daemon=True).start()
-    threading.Thread(target=gpio_button_monitor, daemon=True).start()  # <<추가
-    app.run(host="0.0.0.0", port=5000)
+@app.route("/get_stats")
+def get_stats():
+    import json
+    with lock:
+        stats = {}
+        if os.path.exists("study_log.txt"):
+            with open("study_log.txt", "r") as f:
+                for line in f:
+                    parts = line.strip().split(",")
+                    if len(parts) == 2:
+                        date, seconds = parts
+                        stats[date] = int(seconds)
+    return jsonify(stats)
