@@ -8,7 +8,10 @@ from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
 
 app = Flask(__name__)
-
+from lcd_i2c import LCD
+lcd = LCD()
+lcd.clear()
+lcd.print_line("Time: 00:00:00", 0)
 # =====================
 # Global State
 # =====================
@@ -39,6 +42,7 @@ def timer_loop():
     while True:
         if timer_running and start_time:
             elapsed_time = time.time() - start_time + elapsed_before_stop
+            lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
         time.sleep(1)
 
 def format_time(seconds):
@@ -59,11 +63,12 @@ def start():
 
 @app.route("/stop")
 def stop():
-    global timer_running, elapsed_before_stop
+    global timer_running, elapsed_before_stop, start_time
     with lock:
         if timer_running:
             timer_running = False
             elapsed_before_stop = elapsed_time
+            start_time = None
             print("[API] Timer stopped")
     return "Stopped"
 
@@ -71,10 +76,12 @@ def stop():
 def reset():
     global timer_running, start_time, elapsed_time, drowsy_detected
     global ear_condition_start, dy_condition_start, hand_condition_start, drowsiness_reason
+    global elapsed_before_stop
     with lock:
         timer_running = False
         start_time = None
         elapsed_time = 0
+        elapsed_before_stop = 0
         ear_condition_start = None
         dy_condition_start = None
         hand_condition_start = None
