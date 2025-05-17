@@ -38,13 +38,17 @@ face_mesh = mp_face_mesh.FaceMesh()
 # =====================
 # Timer Functions
 # =====================
+lcd_lock = threading.Lock()
+
 def timer_loop():
     global start_time, elapsed_time
     while True:
         if timer_running and start_time:
             elapsed_time = time.time() - start_time + elapsed_before_stop
-        lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
+        with lcd_lock:
+            lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
         time.sleep(1)
+
 
 def format_time(seconds):
     h = int(seconds) // 3600
