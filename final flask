@@ -7,6 +7,13 @@ from mediapipe.python.solutions import pose as mp_pose
 from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
 
+import RPi.GPIO as GPIO
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Start
+GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
+GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
+
 app = Flask(__name__)
 from lcd_i2c import LCD
 lcd = LCD()
@@ -54,10 +61,15 @@ def format_time(seconds):
 @app.route("/start")
 def start():
     global timer_running, start_time
+    global ear_condition_start, dy_condition_start, hand_condition_start
+
     with lock:
         if not timer_running:
             start_time = time.time()
             timer_running = True
+            ear_condition_start = None
+            dy_condition_start = None
+            hand_condition_start = None
             print("[API] Timer started")
     return "Started"
 
@@ -68,6 +80,7 @@ def stop():
         if timer_running:
             timer_running = False
             elapsed_before_stop = elapsed_time
+            lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
             start_time = None
             print("[API] Timer stopped")
     return "Stopped"
@@ -87,6 +100,8 @@ def reset():
         hand_condition_start = None
         drowsy_detected = False
         drowsiness_reason = ""
+        lcd.print_line("Time: 00:00:00", 0)
+
         print("[RESET] System reset")
     return "Reset"
 
@@ -209,10 +224,52 @@ def drowsiness_detection_loop():
     cap.release()
     cv2.destroyAllWindows()
 
+def button_monitor_loop():
+    global timer_running, start_time, elapsed_time, elapsed_before_stop
+    global ear_condition_start, dy_condition_start, hand_condition_start
+    global drowsy_detected, drowsiness_reason
+
+    while True:
+        if GPIO.input(17) == GPIO.LOW:  # Start 버튼
+            if not timer_running:
+                with lock:
+                    start_time = time.time()
+                    timer_running = True
+                    ear_condition_start = None
+                    dy_condition_start = None
+                    hand_condition_start = None
+                    print("[GPIO] Start button pressed")
+
+        if GPIO.input(27) == GPIO.LOW:  # Stop 버튼
+            if timer_running:
+                with lock:
+                    timer_running = False
+                    elapsed_before_stop = elapsed_time
+                    lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
+                    start_time = None
+                    print("[GPIO] Stop button pressed")
+
+        if GPIO.input(22) == GPIO.LOW:  # Reset 버튼
+            with lock:
+                timer_running = False
+                start_time = None
+                elapsed_time = 0
+                elapsed_before_stop = 0
+                ear_condition_start = None
+                dy_condition_start = None
+                hand_condition_start = None
+                drowsy_detected = False
+                drowsiness_reason = ""
+                lcd.print_line("Time: 00:00:00", 0)
+                print("[GPIO] Reset button pressed")
+
+        time.sleep(0.2)
+
 # =====================
 # Main Execution
 # =====================
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
     threading.Thread(target=timer_loop, daemon=True).start()
+    threading.Thread(target=button_monitor_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
