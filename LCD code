@@ -1,41 +1,5 @@
-import smbus
-import time
-
-class LCD:
-    def __init__(self, addr=0x27):
-        self.addr = addr
-        self.bus = smbus.SMBus(1)
-        self.lcd_init()
-
-    def lcd_init(self):
-        self.lcd_write(0x33, 0)
-        self.lcd_write(0x32, 0)
-        self.lcd_write(0x06, 0)
-        self.lcd_write(0x0C, 0)
-        self.lcd_write(0x28, 0)
-        self.lcd_write(0x01, 0)
-        time.sleep(0.0005)
-
-    def lcd_write(self, cmd, mode):
-        high = mode | (cmd & 0xF0) | 0x08
-        low = mode | ((cmd << 4) & 0xF0) | 0x08
-        self.bus.write_byte(self.addr, high)
-        self.lcd_toggle_enable(high)
-        self.bus.write_byte(self.addr, low)
-        self.lcd_toggle_enable(low)
-
-    def lcd_toggle_enable(self, data):
-        time.sleep(0.0005)
-        self.bus.write_byte(self.addr, data | 0x04)
-        time.sleep(0.0005)
-        self.bus.write_byte(self.addr, data & ~0x04)
-        time.sleep(0.0005)
-
-    def print_line(self, message, line):
-        line_addr = [0x80, 0xC0]
-        self.lcd_write(line_addr[line], 0)
-        for char in message.ljust(16):
-            self.lcd_write(ord(char), 1)
-
-    def clear(self):
-        self.lcd_write(0x01, 0)
+# GPIO 설정
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Start
+GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
+GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
