@@ -1,0 +1,122 @@
+import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
+import 'db_helper.dart';
+
+class StatisticsPage extends StatefulWidget {
+  @override
+  _StatisticsPageState createState() => _StatisticsPageState();
+}
+
+class _StatisticsPageState extends State<StatisticsPage> {
+  String _selectedPeriod = 'day'; // 'day', 'week', 'month'
+  Map<String, int> _studyData = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final data = await DatabaseHelper().getAggregatedStudyTime(_selectedPeriod);
+    setState(() {
+      _studyData = data;
+    });
+  }
+
+  List<BarChartGroupData> _buildBarGroups() {
+    final keys = _studyData.keys.toList().reversed.toList(); // 최신 순
+    return List.generate(keys.length, (index) {
+      final durationSec = _studyData[keys[index]]!;
+      return BarChartGroupData(
+        x: index,
+        barRods: [
+          BarChartRodData(
+            toY: durationSec.toDouble() / 60, // 분 단위로
+            width: 20,
+            borderRadius: BorderRadius.circular(4),
+            backDrawRodData: BackgroundBarChartRodData(show: false),
+          )
+        ],
+      );
+    });
+  }
+
+  List<String> _buildLabels() {
+    return _studyData.keys.toList().reversed.toList();
+  }
+
+  String _formatDuration(int seconds) {
+    final d = Duration(seconds: seconds);
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    final s = d.inSeconds % 60;
+    return "${h}h ${m}m ${s}s";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = _buildLabels();
+    final barGroups = _buildBarGroups();
+
+    return Scaffold(
+      appBar: AppBar(title: Text("통계")),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: DropdownButton<String>(
+              value: _selectedPeriod,
+              items: [
+                DropdownMenuItem(value: 'day', child: Text("일별")),
+                DropdownMenuItem(value: 'week', child: Text("주별")),
+                DropdownMenuItem(value: 'month', child: Text("월별")),
+              ],
+              onChanged: (value) {
+                setState(() => _selectedPeriod = value!);
+                _loadData();
+              },
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: BarChart(
+                BarChartData(
+                  barGroups: barGroups,
+                  titlesData: FlTitlesData(
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: true),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (double value, meta) {
+                          final i = value.toInt();
+                          if (i >= 0 && i < labels.length) {
+                            return Text(labels[i], style: TextStyle(fontSize: 10));
+                          }
+                          return Text('');
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              "총 공부 시간: " +
+                  _formatDuration(_studyData.values.fold(0, (a, b) => a + b)),
+              style: TextStyle(fontSize: 16),
+            ),
+          ),
+          // 졸음 감지 횟수는 DB 구조를 확장한 후 구현 가능
+        ],
+      ),
+    );
+  }
+}
