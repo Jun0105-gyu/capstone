@@ -49,7 +49,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
 
   Future<void> _fetchTime() async {
     try {
-      final res = await http.get(Uri.parse('\$flaskURL/get_time'));
+      final res = await http.get(Uri.parse('$flaskURL/get_time'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -61,7 +61,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
 
   Future<void> _checkDrowsiness() async {
     try {
-      final res = await http.get(Uri.parse('\$flaskURL/detect_drowsiness'));
+      final res = await http.get(Uri.parse('$flaskURL/detect_drowsiness'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data["drowsy"] == true && !_isDrowsy) {
@@ -88,13 +88,13 @@ class _StopwatchPageState extends State<StopwatchPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text("ì¡¸ì ê°ì§!"),
-        content: Text("ì´ì : \$reason"),
+        content: Text("ì´ì : $reason"),
         actions: [
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               _stopAlarm();
+              await http.get(Uri.parse('$flaskURL/clear_drowsiness'));
               _isDrowsy = false;
-              _stopTimer();
               Navigator.of(context).pop();
             },
             child: Text("íì¸"),
@@ -106,7 +106,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
 
   void _startTimer() async {
     if (_isRunning) return;
-    await http.get(Uri.parse('\$flaskURL/start'));
+    await http.get(Uri.parse('$flaskURL/start'));
     setState(() {
       _isRunning = true;
     });
@@ -114,7 +114,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
   }
 
   void _stopTimer() async {
-    await http.get(Uri.parse('\$flaskURL/stop'));
+    await http.get(Uri.parse('$flaskURL/stop'));
     _sendTimeToFlask(_time);
     setState(() {
       _isRunning = false;
@@ -123,7 +123,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
   }
 
   void _resetTimer() async {
-    await http.get(Uri.parse('\$flaskURL/reset'));
+    await http.get(Uri.parse('$flaskURL/reset'));
     setState(() {
       _time = "00:00:00";
       _isRunning = false;
@@ -133,14 +133,14 @@ class _StopwatchPageState extends State<StopwatchPage> {
 
   void _resetServer() async {
     try {
-      await http.get(Uri.parse('\$flaskURL/reset'));
+      await http.get(Uri.parse('$flaskURL/reset'));
     } catch (_) {}
   }
 
   void _sendTimeToFlask(String time) async {
     try {
       await http.post(
-        Uri.parse('\$flaskURL/update_time'),
+        Uri.parse('$flaskURL/update_time'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"time": time}),
       );
