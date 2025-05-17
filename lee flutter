@@ -36,25 +36,24 @@ class _StopwatchPageState extends State<StopwatchPage> {
   void initState() {
     super.initState();
     _audioPlayer = AudioPlayer();
-    _resetServer(); // 앱 실행 시 초기화
+    _resetServer(); // 앱 실행 시 서버 상태 초기화
     _startMonitoring();
   }
 
   void _startMonitoring() {
     Timer.periodic(Duration(seconds: 1), (timer) async {
-      _fetchStatus();
+      if (_isRunning) _fetchTime();
       _checkDrowsiness();
     });
   }
 
-  Future<void> _fetchStatus() async {
+  Future<void> _fetchTime() async {
     try {
-      final res = await http.get(Uri.parse('$flaskURL/status'));
+      final res = await http.get(Uri.parse('$flaskURL/get_time'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
-          _time = data['elapsed_time'];
-          _isRunning = data['timer_running'];
+          _time = data['time'];
         });
       }
     } catch (_) {}
@@ -67,6 +66,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
         final data = jsonDecode(res.body);
         if (data["drowsy"] == true && !_isDrowsy) {
           _isDrowsy = true;
+          _stopTimer();
           _playAlarm();
           _showDrowsinessPopup(data["reason"]);
         }
@@ -91,13 +91,10 @@ class _StopwatchPageState extends State<StopwatchPage> {
         content: Text("이유: $reason"),
         actions: [
           TextButton(
-            onPressed: () async {
+            onPressed: () {
               _stopAlarm();
-              await http.get(Uri.parse('$flaskURL/stop'));
-              await http.get(Uri.parse('$flaskURL/clear_drowsiness'));
-              setState(() {
-                _isDrowsy = false;
-              });
+              // _resetServer();  // 삭제: 타이머 상태 초기화 방지
+              _isDrowsy = false;
               Navigator.of(context).pop();
             },
             child: Text("확인"),
@@ -108,25 +105,31 @@ class _StopwatchPageState extends State<StopwatchPage> {
   }
 
   void _startTimer() async {
-    final res = await http.get(Uri.parse('$flaskURL/status'));
-    final data = jsonDecode(res.body);
-    if (!data['timer_running']) {
-      await http.get(Uri.parse('$flaskURL/start'));
-    }
+    if (_isRunning) return;
+    await http.get(Uri.parse('$flaskURL/start'));
+    setState(() {
+      _isRunning = true;
+    });
+    _timer = Timer.periodic(Duration(seconds: 1), (_) => _fetchTime());
   }
 
   void _stopTimer() async {
     await http.get(Uri.parse('$flaskURL/stop'));
     _sendTimeToFlask(_time);
+    setState(() {
+      _isRunning = false;
+    });
+    _timer?.cancel();
   }
 
   void _resetTimer() async {
-    _sendTimeToStatistics(_time);
+    _sendTimeToFlask(_time);
     await http.get(Uri.parse('$flaskURL/reset'));
     setState(() {
       _time = "00:00:00";
       _isRunning = false;
     });
+    _timer?.cancel();
   }
 
   void _resetServer() async {
@@ -139,16 +142,6 @@ class _StopwatchPageState extends State<StopwatchPage> {
     try {
       await http.post(
         Uri.parse('$flaskURL/update_time'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"time": time}),
-      );
-    } catch (_) {}
-  }
-
-  void _sendTimeToStatistics(String time) async {
-    try {
-      await http.post(
-        Uri.parse('$flaskURL/update_statistics'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"time": time}),
       );
