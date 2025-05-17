@@ -1,22 +1,21 @@
-import traceback
-def gpio_button_monitor():
-    prev_state = [1, 1, 1]
-    while True:
-        btn1 = GPIO.input(17)
-        btn2 = GPIO.input(27)
-        btn3 = GPIO.input(22)
-        try:
-            if prev_state[0] == 1 and btn1 == 0:
-                print("[GPIO] Start 버튼 눌림")
-                requests.get("http://127.0.0.1:5000/start")
-            if prev_state[1] == 1 and btn2 == 0:
-                print("[GPIO] Stop 버튼 눌림")
-                requests.get("http://127.0.0.1:5000/stop")
-            if prev_state[2] == 1 and btn3 == 0:
-                print("[GPIO] Reset 버튼 눌림")
-                requests.get("http://127.0.0.1:5000/reset")
-        except Exception as e:
-            print("[GPIO] requests 에러 발생:", e)
-            traceback.print_exc()
-        prev_state = [btn1, btn2, btn3]
-        time.sleep(0.05)
+@app.route("/reset")
+def reset():
+    global timer_running, start_time, elapsed_time, drowsy_detected
+    global ear_condition_start, dy_condition_start, hand_condition_start, drowsiness_reason
+    global elapsed_before_stop
+    with lock:
+        # === 통계 저장 추가 ===
+        today = datetime.now().strftime("%Y-%m-%d")
+        save_study_time(today, elapsed_before_stop)
+        # ======================
+        timer_running = False
+        start_time = None
+        elapsed_time = 0
+        elapsed_before_stop = 0
+        ear_condition_start = None
+        dy_condition_start = None
+        hand_condition_start = None
+        drowsy_detected = False
+        drowsiness_reason = ""
+        print("[RESET] System reset")
+    return "Reset"
