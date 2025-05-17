@@ -1,34 +1,35 @@
+import os
 import cv2
 import time
 import threading
 import numpy as np
 import RPi.GPIO as GPIO
-from flask import Flask, jsonify, request, send_from_directory
-from mediapipe.python.solutions import pose as mp_pose, hands as mp_hands, face_mesh as mp_face_mesh
-from datetime import datetime
 import json
-import os
+from flask import Flask, jsonify, request, send_from_directory
+from datetime import datetime
+from mediapipe.python.solutions import pose as mp_pose, hands as mp_hands, face_mesh as mp_face_mesh
 from lcd_i2c import LCD
 
-# =====================
-# Configuration
-# =====================
+# ─── 환경 설정 ───────────────────────────────────────────────────────────
+# 로그 메시지 중 불필요한 Mediapipe 경고를 숨깁니다.
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # ERROR 이상만 표시
+import logging
+logging.getLogger("mediapipe").setLevel(logging.ERROR)
+
 STAT_FILE = "study_stats.json"
+
+# GPIO 핀 설정 (BCM 번호)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Start
 GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Stop
 GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Reset
 
-# =====================
-# Initialize Hardware
-# =====================
+# ─── 하드웨어 초기화 ─────────────────────────────────────────────────────
 lcd = LCD()
 lcd.clear()
 lcd.print_line("Time: 00:00:00", 0)
 
-# =====================
-# Global State
-# =====================
+# ─── 글로벌 상태 ────────────────────────────────────────────────────────
 app = Flask(__name__)
 timer_running = False
 start_time = None
@@ -41,46 +42,45 @@ ear_condition_start = None
 dy_condition_start = None
 hand_condition_start = None
 nose_base_y = None
-no_detection_start = None
 
 lock = threading.Lock()
 lcd_lock = threading.Lock()
 
-# =====================
-# MediaPipe Initialization
-# =====================
+# ─── MediaPipe 초기화 ───────────────────────────────────────────────────
 pose = mp_pose.Pose()
 hands = mp_hands.Hands()
-face_mesh = mp_face_mesh.FaceMesh()
+face_mesh = mp_face_mesh.FaceMesh(
+    max_num_faces=1,
+    refine_landmarks=True,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
-# =====================
-# Helper Functions
-# =====================
-def format_time(seconds):
+# ─── 헬퍼 함수 ─────────────────────────────────────────────────────────
+def format_time(seconds: float) -> str:
     h = int(seconds) // 3600
     m = (int(seconds) % 3600) // 60
     s = int(seconds) % 60
     return f"{h:02}:{m:02}:{s:02}"
 
-def parse_time_to_seconds(time_str):
-    h, m, s = map(int, time_str.split(":"))
-    return h * 3600 + m * 60 + s
+def parse_time_to_seconds(t: str) -> int:
+    h, m, s = map(int, t.split(":"))
+    return h*3600 + m*60 + s
 
-def load_stats():
+def load_stats() -> dict:
     if os.path.exists(STAT_FILE):
         with open(STAT_FILE, "r") as f:
             return json.load(f)
     return {}
 
-def save_stats(stats):
+def save_stats(stats: dict):
     with open(STAT_FILE, "w") as f:
         json.dump(stats, f)
 
-def save_study_time(date, seconds):
+def save_study_time(date: str, seconds: int):
     stats = load_stats()
     raw = stats.get(date)
     if isinstance(raw, (int, float)):
-        # old format: just a number → upgrade to dict
         entry = {"study_seconds": raw, "drowsy_count": 0}
     elif raw is None:
         entry = {"study_seconds": 0, "drowsy_count": 0}
@@ -90,7 +90,7 @@ def save_study_time(date, seconds):
     stats[date] = entry
     save_stats(stats)
 
-def save_drowsy_event(date):
+def save_drowsy_event(date: str):
     stats = load_stats()
     raw = stats.get(date)
     if isinstance(raw, (int, float)):
@@ -103,39 +103,34 @@ def save_drowsy_event(date):
     stats[date] = entry
     save_stats(stats)
 
-# =====================
-# GPIO Button Monitor
-# =====================
+# ─── GPIO 버튼 모니터 ───────────────────────────────────────────────────
 def gpio_button_monitor():
-    prev = [1, 1, 1]
+    prev = [1,1,1]
+    import requests
     while True:
-        states = [GPIO.input(17), GPIO.input(27), GPIO.input(22)]
-        if prev[0] == 1 and states[0] == 0:
-            __import__('requests').get("http://127.0.0.1:5000/start")
-        if prev[1] == 1 and states[1] == 0:
-            __import__('requests').get("http://127.0.0.1:5000/stop")
-        if prev[2] == 1 and states[2] == 0:
-            __import__('requests').get("http://127.0.0.1:5000/reset")
-        prev = states
+        curr = [GPIO.input(17), GPIO.input(27), GPIO.input(22)]
+        if prev[0]==1 and curr[0]==0:
+            requests.get("http://127.0.0.1:5000/start")
+        if prev[1]==1 and curr[1]==0:
+            requests.get("http://127.0.0.1:5000/stop")
+        if prev[2]==1 and curr[2]==0:
+            requests.get("http://127.0.0.1:5000/reset")
+        prev = curr
         time.sleep(0.05)
 
-# =====================
-# Timer Thread
-# =====================
+# ─── 타이머 업데이트 쓰레드 ────────────────────────────────────────────
 def timer_loop():
     global elapsed_time
     while True:
-        if timer_running and start_time:
+        if timer_running and start_time is not None:
             elapsed_time = time.time() - start_time + elapsed_before_stop
         with lcd_lock:
             lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
         time.sleep(1)
 
-# =====================
-# Flask API Routes
-# =====================
+# ─── Flask API 라우트 ─────────────────────────────────────────────────
 @app.route("/start")
-def start():
+def api_start():
     global timer_running, start_time, ear_condition_start, dy_condition_start, hand_condition_start
     with lock:
         if not timer_running:
@@ -145,7 +140,7 @@ def start():
     return "Started"
 
 @app.route("/stop")
-def stop():
+def api_stop():
     global timer_running, elapsed_before_stop, start_time
     with lock:
         if timer_running:
@@ -155,28 +150,25 @@ def stop():
     return "Stopped"
 
 @app.route("/reset")
-def reset():
+def api_reset():
     global timer_running, start_time, elapsed_time, elapsed_before_stop
     global ear_condition_start, dy_condition_start, hand_condition_start
-    global drowsy_detected, drowsiness_reason
+    # 1) 공부 시간 저장
     today = datetime.now().strftime("%Y-%m-%d")
-    # 1) Save study time
     save_study_time(today, int(elapsed_before_stop))
-    # 2) Reset state
+    # ２) 상태 초기화
     with lock:
         timer_running = False
         start_time = None
         elapsed_time = 0
         elapsed_before_stop = 0
         ear_condition_start = dy_condition_start = hand_condition_start = None
-        drowsy_detected = False
-        drowsiness_reason = ""
     with lcd_lock:
         lcd.print_line("Time: 00:00:00", 0)
     return "Reset"
 
 @app.route("/clear_drowsiness")
-def clear_drowsiness():
+def api_clear():
     global drowsy_detected, drowsiness_reason, ear_condition_start, dy_condition_start, hand_condition_start
     with lock:
         drowsy_detected = False
@@ -185,11 +177,11 @@ def clear_drowsiness():
     return "Cleared"
 
 @app.route("/get_time")
-def get_time():
+def api_get_time():
     return jsonify({"time": format_time(elapsed_time)})
 
 @app.route("/status")
-def status():
+def api_status():
     return jsonify({
         "timer_running": timer_running,
         "elapsed_time": format_time(elapsed_time),
@@ -198,98 +190,90 @@ def status():
     })
 
 @app.route("/update_statistics", methods=["POST"])
-def update_statistics():
-    data = request.get_json()
+def api_update_stats():
+    data = request.get_json(force=True)
     study_time = data.get("time", "00:00:00")
-    seconds = parse_time_to_seconds(study_time)
+    secs = parse_time_to_seconds(study_time)
     today = datetime.now().strftime("%Y-%m-%d")
-    save_study_time(today, seconds)
+    save_study_time(today, secs)
     return "Statistics updated"
 
 @app.route("/detect_drowsiness")
-def detect_drowsiness():
+def api_detect():
     return jsonify({"drowsy": drowsy_detected, "reason": drowsiness_reason})
 
 @app.route("/study_stats.json")
-def get_stats():
+def api_stats_file():
     return send_from_directory(".", STAT_FILE, mimetype="application/json")
 
-# =====================
-# Drowsiness Detection Thread
-# =====================
+# ─── 졸음 감지 쓰레드 ─────────────────────────────────────────────────
 def drowsiness_detection_loop():
     global ear_condition_start, dy_condition_start, hand_condition_start
-    global drowsy_detected, drowsiness_reason, nose_base_y, no_detection_start
+    global drowsy_detected, drowsiness_reason, nose_base_y
     cap = cv2.VideoCapture(0)
     hand_history = []
     while True:
         ret, frame = cap.read()
         if not ret:
             continue
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pose_res = pose.process(rgb)
-        hands_res = hands.process(rgb)
-        face_res = face_mesh.process(rgb)
-        now = time.time()
 
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # IMAGE_DIMENSIONS 제공을 위해 프레임 크기 지정
+        face_results = face_mesh.process(rgb)  # Python wrapper 자체에서 프레임 크기를 내부 참조
+        pose_results = pose.process(rgb)
+        hands_results = hands.process(rgb)
+
+        now = time.time()
         # EAR
         ear = 0
-        if face_res.multi_face_landmarks:
-            lm = face_res.multi_face_landmarks[0].landmark
+        if face_results.multi_face_landmarks:
+            lm = face_results.multi_face_landmarks[0].landmark
             ear = np.linalg.norm([lm[386].x - lm[374].x, lm[386].y - lm[374].y])
         if ear < 0.015:
-            if not ear_condition_start:
-                ear_condition_start = now
+            ear_condition_start = ear_condition_start or now
         else:
             ear_condition_start = None
 
         # DY
         dy = 0
-        if pose_res.pose_landmarks:
-            ny = pose_res.pose_landmarks.landmark[0].y
+        if pose_results.pose_landmarks:
+            ny = pose_results.pose_landmarks.landmark[0].y
             if nose_base_y is None:
                 nose_base_y = ny
-            dy = (ny - nose_base_y)*1000
-            if dy > 150:
-                if not dy_condition_start:
-                    dy_condition_start = now
-            else:
+            dy = (ny - nose_base_y) * 1000
+            dy_condition_start = dy_condition_start or (now if dy > 150 else None)
+            if dy <= 150:
                 dy_condition_start = None
 
         # Hand movement
         movement = 0
-        if hands_res.multi_hand_landmarks:
-            lm = hands_res.multi_hand_landmarks[0].landmark[10]
+        if hands_results.multi_hand_landmarks:
+            lm = hands_results.multi_hand_landmarks[0].landmark[10]
             hand_history.append((lm.x, lm.y, now))
             hand_history = [h for h in hand_history if now - h[2] <= 5]
-            if len(hand_history)>=2:
+            if len(hand_history) >= 2:
                 movement = np.mean([
                     np.linalg.norm(np.subtract(hand_history[i][:2], hand_history[i-1][:2]))
-                    for i in range(1,len(hand_history))
+                    for i in range(1, len(hand_history))
                 ]) * 1000
-        if movement < 13:
-            if not hand_condition_start:
-                hand_condition_start = now
-        else:
-            hand_condition_start = None
+        hand_condition_start = hand_condition_start or (now if movement < 13 else None)
 
-        # Drowsiness
+        # 졸음 감지
         if timer_running and not drowsy_detected:
-            eye = ear_condition_start and (now-ear_condition_start>=5)
-            head = dy_condition_start and (now-dy_condition_start>=4)
-            hand = hand_condition_start and (now-hand_condition_start>=5)
+            eye = ear_condition_start and (now - ear_condition_start >= 5)
+            head = dy_condition_start and (now - dy_condition_start >= 4)
+            hand = hand_condition_start and (now - hand_condition_start >= 5)
             if hand and (eye or head):
                 drowsy_detected = True
                 drowsiness_reason = "HAND + EYE" if eye else "HAND + HEAD"
                 save_drowsy_event(datetime.now().strftime("%Y-%m-%d"))
+
         time.sleep(0.01)
 
     cap.release()
     cv2.destroyAllWindows()
 
-# =====================
-# Main
-# =====================
+# ─── 메인 실행 ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
     threading.Thread(target=timer_loop, daemon=True).start()
