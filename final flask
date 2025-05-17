@@ -7,6 +7,19 @@ from mediapipe.python.solutions import pose as mp_pose
 from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
 
+from flask import Response
+cap = cv2.VideoCapture(0)
+
+def generate_video():
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
 import RPi.GPIO as GPIO
 
 GPIO.setmode(GPIO.BCM)
@@ -45,11 +58,14 @@ face_mesh = mp_face_mesh.FaceMesh()
 # Timer Functions
 # =====================
 def timer_loop():
-    global start_time, elapsed_time
+    global start_time, elapsed_time, timer_running, elapsed_before_stop
     while True:
         if timer_running and start_time:
             elapsed_time = time.time() - start_time + elapsed_before_stop
+            print(f"[TIMER] {format_time(elapsed_time)}")
             lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
+        else:
+            print("[TIMER] waiting for start...")
         time.sleep(1)
 
 def format_time(seconds):
@@ -58,12 +74,31 @@ def format_time(seconds):
     s = int(seconds) % 60
     return f"{h:02}:{m:02}:{s:02}"
 
+@app.route("/video_feed")
+def video_feed():
+    return Response(generate_video(), mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.route("/")
+def index():
+    return '''
+    <html>
+        <head>
+            <title>카메라 미리보기</title>
+        </head>
+        <body>
+            <h1>Live Camera Feed</h1>
+            <img src="/video_feed" width="640" height="480">
+        </body>
+    </html>
+    '''
+
 @app.route("/start")
 def start():
     global timer_running, start_time
     global ear_condition_start, dy_condition_start, hand_condition_start
 
+    print("[API] /start called")
     with lock:
+        print(f"→ before start: timer_running={timer_running}")
         if not timer_running:
             start_time = time.time()
             timer_running = True
@@ -71,6 +106,7 @@ def start():
             dy_condition_start = None
             hand_condition_start = None
             print("[API] Timer started")
+            print(f"→ start_time: {start_time}, timer_running: {timer_running}")
     return "Started"
 
 @app.route("/stop")
@@ -141,7 +177,6 @@ def drowsiness_detection_loop():
     global ear_condition_start, dy_condition_start, hand_condition_start
     global drowsy_detected, drowsiness_reason, nose_base_y
 
-    cap = cv2.VideoCapture(0)
     hand_history = []
 
     while True:
@@ -217,9 +252,9 @@ def drowsiness_detection_loop():
                 drowsiness_reason = "HAND + EYE" if eye_drowsy else "HAND + HEAD"
                 print(f"=== DROWSINESS DETECTED: {drowsiness_reason} ===")
 
-        cv2.imshow("Drowsiness Detection", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+       # cv2.imshow("Drowsiness Detection", frame)
+       # if cv2.waitKey(1) & 0xFF == ord('q'):
+          # break
 
     cap.release()
     cv2.destroyAllWindows()
