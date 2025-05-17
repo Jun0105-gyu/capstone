@@ -8,9 +8,9 @@ from mediapipe.python.solutions import hands as mp_hands
 from mediapipe.python.solutions import face_mesh as mp_face_mesh
 
 from flask import Response
+cap = cv2.VideoCapture(0)
 
 def generate_video():
-    cap = cv2.VideoCapture(0)
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -58,11 +58,14 @@ face_mesh = mp_face_mesh.FaceMesh()
 # Timer Functions
 # =====================
 def timer_loop():
-    global start_time, elapsed_time
+    global start_time, elapsed_time, timer_running, elapsed_before_stop
     while True:
         if timer_running and start_time:
             elapsed_time = time.time() - start_time + elapsed_before_stop
+            print(f"[TIMER] {format_time(elapsed_time)}")
             lcd.print_line(f"Time: {format_time(elapsed_time)}", 0)
+        else:
+            print("[TIMER] waiting for start...")
         time.sleep(1)
 
 def format_time(seconds):
@@ -93,7 +96,9 @@ def start():
     global timer_running, start_time
     global ear_condition_start, dy_condition_start, hand_condition_start
 
+    print("[API] /start called")
     with lock:
+        print(f"→ before start: timer_running={timer_running}")
         if not timer_running:
             start_time = time.time()
             timer_running = True
@@ -101,6 +106,7 @@ def start():
             dy_condition_start = None
             hand_condition_start = None
             print("[API] Timer started")
+            print(f"→ start_time: {start_time}, timer_running: {timer_running}")
     return "Started"
 
 @app.route("/stop")
@@ -171,7 +177,6 @@ def drowsiness_detection_loop():
     global ear_condition_start, dy_condition_start, hand_condition_start
     global drowsy_detected, drowsiness_reason, nose_base_y
 
-    cap = cv2.VideoCapture(0)
     hand_history = []
 
     while True:
