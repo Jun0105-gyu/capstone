@@ -1,3 +1,13 @@
-@app.route("/video_feed")
-def video_feed():
-    return Response(generate_video(), mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.route("/")
+def index():
+    return '''
+    <html>
+        <head>
+            <title>카메라 미리보기</title>
+        </head>
+        <body>
+            <h1>Live Camera Feed</h1>
+            <img src="/video_feed" width="640" height="480">
+        </body>
+    </html>
+    '''
