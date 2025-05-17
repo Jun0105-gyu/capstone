@@ -78,14 +78,27 @@ def save_stats(stats):
 
 def save_study_time(date, seconds):
     stats = load_stats()
-    entry = stats.get(date, {"study_seconds": 0, "drowsy_count": 0})
+    raw = stats.get(date)
+    if isinstance(raw, (int, float)):
+        # old format: just a number → upgrade to dict
+        entry = {"study_seconds": raw, "drowsy_count": 0}
+    elif raw is None:
+        entry = {"study_seconds": 0, "drowsy_count": 0}
+    else:
+        entry = raw
     entry["study_seconds"] += seconds
     stats[date] = entry
     save_stats(stats)
 
 def save_drowsy_event(date):
     stats = load_stats()
-    entry = stats.get(date, {"study_seconds": 0, "drowsy_count": 0})
+    raw = stats.get(date)
+    if isinstance(raw, (int, float)):
+        entry = {"study_seconds": raw, "drowsy_count": 0}
+    elif raw is None:
+        entry = {"study_seconds": 0, "drowsy_count": 0}
+    else:
+        entry = raw
     entry["drowsy_count"] += 1
     stats[date] = entry
     save_stats(stats)
@@ -97,16 +110,10 @@ def gpio_button_monitor():
     prev = [1, 1, 1]
     while True:
         states = [GPIO.input(17), GPIO.input(27), GPIO.input(22)]
-        # Start
         if prev[0] == 1 and states[0] == 0:
-            requests = ("http://127.0.0.1:5000/start")
-            GPIO.sleep = False
-            requests = __import__('requests')
-            requests.get("http://127.0.0.1:5000/start")
-        # Stop
+            __import__('requests').get("http://127.0.0.1:5000/start")
         if prev[1] == 1 and states[1] == 0:
             __import__('requests').get("http://127.0.0.1:5000/stop")
-        # Reset
         if prev[2] == 1 and states[2] == 0:
             __import__('requests').get("http://127.0.0.1:5000/reset")
         prev = states
@@ -134,9 +141,7 @@ def start():
         if not timer_running:
             start_time = time.time()
             timer_running = True
-            ear_condition_start = None
-            dy_condition_start = None
-            hand_condition_start = None
+            ear_condition_start = dy_condition_start = hand_condition_start = None
     return "Started"
 
 @app.route("/stop")
@@ -163,9 +168,7 @@ def reset():
         start_time = None
         elapsed_time = 0
         elapsed_before_stop = 0
-        ear_condition_start = None
-        dy_condition_start = None
-        hand_condition_start = None
+        ear_condition_start = dy_condition_start = hand_condition_start = None
         drowsy_detected = False
         drowsiness_reason = ""
     with lcd_lock:
@@ -178,9 +181,7 @@ def clear_drowsiness():
     with lock:
         drowsy_detected = False
         drowsiness_reason = ""
-        ear_condition_start = None
-        dy_condition_start = None
-        hand_condition_start = None
+        ear_condition_start = dy_condition_start = hand_condition_start = None
     return "Cleared"
 
 @app.route("/get_time")
@@ -226,70 +227,68 @@ def drowsiness_detection_loop():
         if not ret:
             continue
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pose_results = pose.process(rgb)
-        hands_results = hands.process(rgb)
-        face_results = face_mesh.process(rgb)
-        current_time = time.time()
+        pose_res = pose.process(rgb)
+        hands_res = hands.process(rgb)
+        face_res = face_mesh.process(rgb)
+        now = time.time()
 
         # EAR
         ear = 0
-        if face_results.multi_face_landmarks:
-            lm = face_results.multi_face_landmarks[0].landmark
+        if face_res.multi_face_landmarks:
+            lm = face_res.multi_face_landmarks[0].landmark
             ear = np.linalg.norm([lm[386].x - lm[374].x, lm[386].y - lm[374].y])
         if ear < 0.015:
             if not ear_condition_start:
-                ear_condition_start = current_time
+                ear_condition_start = now
         else:
             ear_condition_start = None
 
         # DY
         dy = 0
-        if pose_results.pose_landmarks:
-            nose_y = pose_results.pose_landmarks.landmark[0].y
+        if pose_res.pose_landmarks:
+            ny = pose_res.pose_landmarks.landmark[0].y
             if nose_base_y is None:
-                nose_base_y = nose_y
-            dy = (nose_y - nose_base_y) * 1000
+                nose_base_y = ny
+            dy = (ny - nose_base_y)*1000
             if dy > 150:
                 if not dy_condition_start:
-                    dy_condition_start = current_time
+                    dy_condition_start = now
             else:
                 dy_condition_start = None
 
         # Hand movement
         movement = 0
-        if hands_results.multi_hand_landmarks:
-            lm = hands_results.multi_hand_landmarks[0].landmark[10]
-            hand_history.append((lm.x, lm.y, current_time))
-            hand_history = [h for h in hand_history if current_time - h[2] <= 5]
-            if len(hand_history) >= 2:
+        if hands_res.multi_hand_landmarks:
+            lm = hands_res.multi_hand_landmarks[0].landmark[10]
+            hand_history.append((lm.x, lm.y, now))
+            hand_history = [h for h in hand_history if now - h[2] <= 5]
+            if len(hand_history)>=2:
                 movement = np.mean([
                     np.linalg.norm(np.subtract(hand_history[i][:2], hand_history[i-1][:2]))
-                    for i in range(1, len(hand_history))
+                    for i in range(1,len(hand_history))
                 ]) * 1000
         if movement < 13:
             if not hand_condition_start:
-                hand_condition_start = current_time
+                hand_condition_start = now
         else:
             hand_condition_start = None
 
-        # Drowsiness detection
+        # Drowsiness
         if timer_running and not drowsy_detected:
-            eye_drowsy = ear_condition_start and (current_time - ear_condition_start >= 5)
-            head_drowsy = dy_condition_start and (current_time - dy_condition_start >= 4)
-            hand_drowsy = hand_condition_start and (current_time - hand_condition_start >= 5)
-            if hand_drowsy and (eye_drowsy or head_drowsy):
+            eye = ear_condition_start and (now-ear_condition_start>=5)
+            head = dy_condition_start and (now-dy_condition_start>=4)
+            hand = hand_condition_start and (now-hand_condition_start>=5)
+            if hand and (eye or head):
                 drowsy_detected = True
-                drowsiness_reason = "HAND + EYE" if eye_drowsy else "HAND + HEAD"
-                # Log the drowsy event
-                today = datetime.now().strftime("%Y-%m-%d")
-                save_drowsy_event(today)
+                drowsiness_reason = "HAND + EYE" if eye else "HAND + HEAD"
+                save_drowsy_event(datetime.now().strftime("%Y-%m-%d"))
         time.sleep(0.01)
 
     cap.release()
     cv2.destroyAllWindows()
 
 # =====================
-# Main Execution
+# Main
 # =====================
 if __name__ == "__main__":
     threading.Thread(target=drowsiness_detection_loop, daemon=True).start()
