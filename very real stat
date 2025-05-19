@@ -81,7 +81,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         x: index,
         barRods: [
           BarChartRodData(
-            toY: durationSec.toDouble() / 60, // 분 단위
+            toY: durationSec.toDouble() / 10, // 분 단위
             width: 20,
             borderRadius: BorderRadius.circular(4),
             backDrawRodData: BackgroundBarChartRodData(show: false),
@@ -141,10 +141,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
               child: BarChart(
                 BarChartData(
                   barGroups: barGroups,
-                  maxY: 10.0, // 0~10분
+                  maxY: 60.0, // 0~10분
                   titlesData: FlTitlesData(
                     leftTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: true, interval: 1.0),
+                      sideTitles: SideTitles(showTitles: false, interval: 1.0),
                     ),
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
