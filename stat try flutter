@@ -141,7 +141,7 @@ class _StopwatchPageState extends State<StopwatchPage> {
   void _sendTimeToFlask(String time) async {
     try {
       await http.post(
-        Uri.parse('$flaskURL/update_time'),
+        Uri.parse('$flaskURL/update_statistics'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"time": time}),
       );
