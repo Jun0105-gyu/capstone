@@ -101,16 +101,11 @@ def timer_loop():
 
 @app.route("/get_stats")
 def get_stats():
-    import json
     with lock:
         stats = {}
-        if os.path.exists("study_log.txt"):
-            with open("study_log.txt", "r") as f:
-                for line in f:
-                    parts = line.strip().split(",")
-                    if len(parts) == 2:
-                        date, seconds = parts
-                        stats[date] = int(seconds)
+        if os.path.exists("study_stats.json"):
+            with open("study_stats.json", "r") as f:
+                stats = json.load(f)
     return jsonify(stats)
 
 def format_time(seconds):
