@@ -57,11 +57,15 @@ def save_study_time(date, seconds):
     if os.path.exists(STAT_FILE):
         with open(STAT_FILE, "r") as f:
             stats = json.load(f)
-    # 날짜별 누적
+    # 날짜별 누적 (숫자만 저장)
     if date in stats:
-        stats[date] += seconds
+        # 날짜 값이 딕셔너리 형태일 수 있으니 숫자만 추출
+        prev = stats[date]
+        if isinstance(prev, dict):
+            prev = prev.get("study_seconds", 0)
+        stats[date] = prev + int(seconds)
     else:
-        stats[date] = seconds
+        stats[date] = int(seconds)
     with open(STAT_FILE, "w") as f:
         json.dump(stats, f)
 
@@ -192,6 +196,18 @@ def update_time():
 def detect_drowsiness():
     with lock:
         return jsonify({"drowsy": drowsy_detected, "reason": drowsiness_reason})
+
+@app.route("/update_statistics", methods=["POST"])
+def update_statistics():
+    global elapsed_before_stop
+    with lock:
+        data = request.get_json()
+        h, m, s = map(int, data["time"].split(":"))
+        elapsed_before_stop = h * 3600 + m * 60 + s
+        today = datetime.now().strftime("%Y-%m-%d")
+        save_study_time(today, elapsed_before_stop)
+    return "Statistics updated"
+
 
 # =====================
 # Drowsiness Detection Thread
