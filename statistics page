@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:intl/intl.dart';
-import 'db_helper.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class StatisticsPage extends StatefulWidget {
   @override
@@ -19,21 +19,28 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Future<void> _loadData() async {
-    final data = await DatabaseHelper().getAggregatedStudyTime(_selectedPeriod);
-    setState(() {
-      _studyData = data;
-    });
+    final response = await http.get(Uri.parse('http://192.168.137.69:5000/get_stats'));
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(response.body);
+      setState(() {
+        _studyData = data.map((k, v) {
+          if (v is int) return MapEntry(k, v);
+          if (v is double) return MapEntry(k, v.toInt());
+          return MapEntry(k, int.tryParse(v.toString()) ?? 0);
+        });
+      });
+    }
   }
 
   List<BarChartGroupData> _buildBarGroups() {
-    final keys = _studyData.keys.toList().reversed.toList(); // 최신 순
+    final keys = _studyData.keys.toList().reversed.toList();
     return List.generate(keys.length, (index) {
       final durationSec = _studyData[keys[index]]!;
       return BarChartGroupData(
         x: index,
         barRods: [
           BarChartRodData(
-            toY: durationSec.toDouble() / 60, // 분 단위로
+            toY: durationSec.toDouble() / 60,
             width: 20,
             borderRadius: BorderRadius.circular(4),
             backDrawRodData: BackgroundBarChartRodData(show: false),
@@ -114,7 +121,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
               style: TextStyle(fontSize: 16),
             ),
           ),
-          // 졸음 감지 횟수는 DB 구조를 확장한 후 구현 가능
         ],
       ),
     );
