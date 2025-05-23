@@ -1,5 +1,3 @@
-import ... # 생략
-
 def wait_for_flask():
     import socket
     while True:
@@ -8,11 +6,9 @@ def wait_for_flask():
             s.close()
             break
         except OSError:
-            print("Flask 서버가 아직 열리지 않음, 대기 중...")
+            print("Flask Server waiting")
             time.sleep(0.5)
 
 def gpio_button_monitor():
-    wait_for_flask()  # 서버 열릴 때까지 대기!
+    wait_for_flask()  # 이 줄을 추가!
     prev_state = [1, 1, 1]
-    while True:
-        # 이하 생략...
