@@ -1,1 +1,18 @@
-ps aux | grep python
+import ... # 생략
+
+def wait_for_flask():
+    import socket
+    while True:
+        try:
+            s = socket.create_connection(('127.0.0.1', 5000), timeout=1)
+            s.close()
+            break
+        except OSError:
+            print("Flask 서버가 아직 열리지 않음, 대기 중...")
+            time.sleep(0.5)
+
+def gpio_button_monitor():
+    wait_for_flask()  # 서버 열릴 때까지 대기!
+    prev_state = [1, 1, 1]
+    while True:
+        # 이하 생략...
